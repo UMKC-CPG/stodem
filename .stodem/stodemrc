@@ -1,0 +1,8 @@
+#!/bin/bash
+
+export STODEM_BRANCH="stodem"
+export STODEM_DIR=$HOME/CPG/cpg-repo/$STODEM_BRANCH
+export STODEM_RC="$STODEM_DIR/.stodem"
+export STODEM_BIN="$STODEM_DIR/bin"
+
+export PATH=$STODEM_BIN:$PATH
