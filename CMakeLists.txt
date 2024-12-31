@@ -1,8 +1,8 @@
-# Top level CMake file for OLCAO
+# Top level CMake file for STODEM
 
 # Set the minimum required version, the project name, and enable Fortran.
 cmake_minimum_required(VERSION 3.1.0)
-project(OLCAO)
+project(STODEM)
 enable_language (Fortran)
 
 # Make sure that the default build type is a RELEASE
@@ -11,10 +11,13 @@ if (NOT CMAKE_BUILD_TYPE)
       "Choose the type of build, options are: None Debug Release." FORCE)
 endif (NOT CMAKE_BUILD_TYPE)
 
-# Establish the installation location on the basis of the $OLCAO_DIR
+# Establish the installation location on the basis of the $STODEM_DIR
 #   environment variable that is defined in the .olcao file. Make sure that you
 #   source this file (source .olcao) before you try to build.
-set (CMAKE_INSTALL_PREFIX $ENV{OLCAO_DIR})
+if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+   set (CMAKE_INSTALL_PREFIX $ENV{STODEM_DIR})
+   set_property (CACHE CMAKE_INSTALL_PREFIX PROPERTY VALUE $ENV{STODEM_DIR})
+endif (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 message("CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
 
 # Get the full path of the compiler from the FC environment variable and
@@ -24,11 +27,11 @@ message("CMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}")
 #   etc. We need all of those pieces of information. (Note that FC should be
 #   defined before attempting to build.)
 # Another tricky note is that the Fortran compiler that was used to compile
-#   the HDF5 library must also be used as the compiler for OLCAO. Otherwise the
+#   the HDF5 library must also be used as the compiler for STODEM. Otherwise the
 #   module files will not be properly recognized. (At least it is the case that
 #   gfortran and intel cannot read eachother's .mod files. I.e. the HDF5.mod
 #   file that is created when HDF5 is compiled must be readable by the compiler
-#   that you are using to compile OLCAO.)
+#   that you are using to compile STODEM.)
 get_filename_component (CMAKE_Fortran_COMPILER $ENV{FC} PROGRAM)
 get_filename_component (Fortran_COMPILER_NAME ${CMAKE_Fortran_COMPILER} NAME)
 message("Fortran_COMPILER_NAME= ${Fortran_COMPILER_NAME}")
@@ -41,17 +44,17 @@ message("CMAKE_Fortran_COMPILER_ID= ${CMAKE_Fortran_COMPILER_ID}")
 #   you have a particular compiler requirement. I think that this might be
 #   easier than attempting to read the user's $FCFLAGS and $LDFLAGS variables
 #   because the user may change those to compile other programs and may not
-#   retain a record of what they were when he/she compiles OLCAO. If the user
+#   retain a record of what they were when he/she compiles STODEM. If the user
 #   stores it here then he/she will have a record. I guess just be careful to
 #   retain that information if you get a new version from github. Or something.
 if (CMAKE_Fortran_COMPILER_ID MATCHES "GNU")
-   set (CMAKE_Fortran_FLAGS_DEBUG "-g -fimplicit-none -Wall -DDEBUG")
+   set (CMAKE_Fortran_FLAGS_DEBUG "-Og -g -fcheck=all -fimplicit-none -Wall -fbacktrace -DDEBUG")
    #   if (DEFINED ENV{MKLROOT})
    #   set (CMAKE_Fortran_FLAGS_RELEASE "-O3 -fimplicit-none -Wall -fdefault-integer-8 -m64 -I$ENV{MKLROOT}/include")
    #   set (CMAKE_EXE_LINKER_FLAGS " -L$ENV{MKLROOT}/lib -Wl,--no-as-needed -lmkl_gf_ilp64 -lmkl_sequential -lmkl_core -lpthread -lm -ldl")
    #else()
       set (CMAKE_Fortran_FLAGS_RELEASE "-O3 -fimplicit-none -Wall")
-      set (CMAKE_EXE_LINKER_FLAGS "-llapack -lblas")
+      set (CMAKE_EXE_LINKER_FLAGS "-L/usr/lib -I/usr/include -llapack -lblas") # -L,-I for nanoHUB
       #endif (DEFINED ENV{MKLROOT})
 elseif (CMAKE_Fortran_COMPILER_ID MATCHES "Intel")
    set (CMAKE_Fortran_FLAGS_RELEASE "-ipo -O3 -heap-arrays")
