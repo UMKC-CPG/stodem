@@ -330,12 +330,32 @@ class Patch():
 
 
 class Citizen():
-    # Citizens have an innate "emotional" position.
+    # Citizens have an innate "emotional" position that can change to align with a
+    #   politician.
 
-    # Citizens have a probability of participation.
+    # Citizens have a stated policy position for each policy. This is the policy position
+    #   that the citizen claims to align with and it will affect their preference for a
+    #   particular politician.
 
-    # Citizens have a factor that weights the degree to which they will use emotional or policy
-    #   alignment when deciding who to vote for.
+    # Citizens have a most-beneficial policy position that the citizen does not directly know.
+    #   I.e., the well-being of the citizen will depend on the alignment between governing
+    #   policy and this most-beneficial policy, but the stated policy may be quite different
+    #   than the most-beneficial policy. For example, if a policy represented "tax rates", it
+    #   is hard to know what the best tax rate for an individual should be. If it was set to
+    #   zero, the individual would pay nothing, but also likely have no services. If it was
+    #   set to 100% they would lose flexibility, but would have many servies. The "correct"
+    #   number is not easy for any individual to know and that individual's stated preference
+    #   may easily be different than whatever number actually benefits them the most.
+
+    # Citizens have a probability of participation is affected (in no order) by:
+    #   (1) The emotional alignment between a citizen and a politician.
+    #   (2) The cumulative policy position alignment between a citizen and a politician.
+    #   (3) Whether or not the citizen voted previously.
+    #   (4) The number citizens in the same zone that will vote in agreement with the citizen.
+    #   (5) The well-being of the citizen.
+
+    # Citizens have a well-being factor that weights the degree to which they will use emotional
+    #   or policy alignment when deciding how to cast their vote.
      
 
     def __init__(self, settings, patch):
@@ -352,7 +372,8 @@ class Citizen():
         self.policy_emot_ratio = np.random.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
                 ["policy_emot_ratio_stddiv"]),size=1)
-        self.current_patch_x = settings
+        self.current_patch_x = patch.x_location
+        self.current_patch_y = patch.y_location
 
 
 class Politician():
@@ -418,9 +439,16 @@ def campaign(sim_control, world):
             politician.adapt_to_patch(world)
 
         # Politicians campaign to local citizens.
-        for politician in world.politicians:
+        #for politician in world.politicians:
+            
 
 
+def vote(sim_control, world):
+    return
+
+
+def govern(sim_control, world):
+    return
 
 
 def main():
@@ -438,8 +466,8 @@ def main():
     # Initialize the simulation world.
     world = World(settings)
     world.populate(settings)
-    #print(World.citizens[0].policy_emot_ratio)
-    #print(World.politicians[0].pander)
+    #print(world.citizens[0].policy_emot_ratio)
+    #print(world.politicians[0].pander)
 
     # Start executing the main activities of the program.
     for cycle in range(sim_control.num_cycles):
