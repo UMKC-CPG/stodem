@@ -126,7 +126,7 @@ class SimControl():
     primary_campaign_steps_pow = 0
     num_campaign_steps = 0
     num_govern_steps = 0
-    num_primary_steps = 0
+    num_primary_campaign_steps = 0
 
 
     def __init__(self, settings):
@@ -135,17 +135,18 @@ class SimControl():
                 int(settings.infile_dict[1]["sim_control"]["campaign_steps_pow"])
         SimControl.govern_steps_pow = \
                 int(settings.infile_dict[1]["sim_control"]["govern_steps_pow"])
-        SimControl.primary_steps_pow = \
-                int(settings.infile_dict[1]["sim_control"]["primary_steps_pow"])
+        SimControl.primary_campaign_steps_pow = \
+                int(settings.infile_dict[1]["sim_control"]["primary_campaign_steps_pow"])
 
         SimControl.num_campaign_steps = 10**SimControl.campaign_steps_pow
         SimControl.num_govern_steps = 10**SimControl.govern_steps_pow
-        SimControl.num_primary_steps = 10**SimControl.primary_steps_pow
+        SimControl.num_primary_campaign_steps = 10**SimControl.primary_campaign_steps_pow
 
 
 class World():
 
     # Declare class variables.
+    num_policy_dims = 0
     x_num_patches = 1
     y_num_patches = 1
     patch_size = 0
@@ -157,6 +158,9 @@ class World():
     def __init__(self, settings):
 
         # Define the global properties of the world.
+
+        # Get the number of policy dimensions.
+        World.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
 
         # Get the patch size.
         World.patch_size = int(settings.infile_dict[1]["world"]["patch_size"])
@@ -291,6 +295,7 @@ class Zone():
     def add_patch(self, patch):
         self.patches.append(patch)
 
+
     def random_patch(self):
         return random.choice(self.patches)
 
@@ -347,7 +352,7 @@ class Citizen():
     #   number is not easy for any individual to know and that individual's stated preference
     #   may easily be different than whatever number actually benefits them the most.
 
-    # Citizens have a probability of participation is affected (in no order) by:
+    # Citizens have a probability of participation. It is affected (in no order) by:
     #   (1) The emotional alignment between a citizen and a politician.
     #   (2) The cumulative policy position alignment between a citizen and a politician.
     #   (3) Whether or not the citizen voted previously.
@@ -363,9 +368,14 @@ class Citizen():
         # Define the initial instance variables of this citizen.
         self.participation_prob = float(settings.infile_dict[1]["citizens"]
                                         ["participation_prob"])
-        self.policy_pos = np.random.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_stddiv"]),size=10)
+        self.stated_policy_pos = np.random.normal(
+                loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
+                ["policy_stddiv"]),size=int(settings.infile_dict[1]["world"]["num_policy_dims"]))
+        self.ideal_policy_pos = self.stated_policy_pos.copy()
+        self.ideal_policy_pos = [x + np.random.normal(
+                loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
+                ["ideal_policy_stddiv"])) for x in self.ideal_policy_pos]
+        self.policy_consistency = self.policy_alignment()
         self.emot_pos = np.random.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
                 ["emot_stddiv"]),size=1)
@@ -374,6 +384,15 @@ class Citizen():
                 ["policy_emot_ratio_stddiv"]),size=1)
         self.current_patch_x = patch.x_location
         self.current_patch_y = patch.y_location
+
+
+    def policy_alignment(self):
+        alignment = 0 # Represents perfect alignment.
+        for (stated, ideal) in zip(self.stated_policy_pos, self.ideal_policy_pos):
+            alignment += abs(stated - ideal)
+
+        return alignment
+
 
 
 class Politician():
@@ -428,6 +447,14 @@ class Politician():
         self.zone_type = zone_type
         self.zone = zone
         self.patch = patch
+
+
+    def move(self, world):
+        return
+
+    
+    def adapt_to_patch(self, world):
+        return
 
 
 def campaign(sim_control, world):
