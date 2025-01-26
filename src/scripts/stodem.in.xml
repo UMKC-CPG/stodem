@@ -1,14 +1,15 @@
 <?xml version="1.0" encoding="utf-8"?>
 <stodem Version="1.0" xmlns:sd="http://www.w3.org/2001/XInclude">
    <sim_control>
-      <num_cycles>20</num_cycles>
-      <campaign_steps_pow>3</campaign_steps_pow>
-      <govern_steps_pow>4</govern_steps_pow>
-      <primary_campaign_steps_pow>3</primary_campaign_steps_pow>
+      <num_cycles>1</num_cycles>
+      <num_campaign_steps>10</num_campaign_steps>
+      <num_govern_steps>50</num_govern_steps>
+      <num_primary_campaign_steps>10</num_primary_campaign_steps>
    </sim_control>
    <world>
       <patch_size>5</patch_size>
-      <num_policy_dims>10</num_policy_dims>
+      <num_policy_dims>5</num_policy_dims>
+      <num_emot_dims>3</num_emot_dims>
       <num_zone_types>3</num_zone_types>
       <zone_type_0>
          <name>district</name>
@@ -45,19 +46,33 @@
       <initial_num_citizens>5</initial_num_citizens>
    </patch>
    <citizens>
-      <policy_stddiv>2</policy_stddiv>
-      <ideal_policy_stddiv>2</ideal_policy_stddiv>
-      <emot_stddiv>2</emot_stddiv>
+      <policy_pos_stddiv>2</policy_pos_stddiv>
+      <policy_spread_stddiv>2</policy_spread_stddiv>
+      <policy_orientation>imaginary</policy_orientation>
+      <ideal_policy_pos_stddiv>2</ideal_policy_pos_stddiv>
+      <emot_pos_stddiv>2</emot_pos_stddiv>
+      <emot_spread_stddiv>2</emot_spread_stddiv>
       <policy_emot_ratio_stddiv>0.2</policy_emot_ratio_stddiv>
       <participation_prob>0.65</participation_prob>
    </citizens>
    <politicians>
-      <policy_stddiv>2</policy_stddiv>
-      <emot_stddiv>2</emot_stddiv>
+      <policy_pos_stddiv>2</policy_pos_stddiv>
+      <policy_spread_stddiv>2</policy_spread_stddiv>
+      <policy_orientation>uniform</policy_orientation>
+      <emot_pos_stddiv>2</emot_pos_stddiv>
+      <emot_spread_stddiv>2</emot_spread_stddiv>
       <policy_influence_stddiv>2</policy_influence_stddiv>
       <emot_influence_stddiv>2</emot_influence_stddiv>
       <policy_lie_stddiv>2</policy_lie_stddiv>
       <emot_lie_stddiv>2</emot_lie_stddiv>
       <pander_stddiv>2</pander_stddiv>
+      <cumul_move_strategy_probs>0.5,0.75,1.0</cumul_move_strategy_probs>
+      <cumul_adapt_strategy_probs>0.5,0.75,1.0</cumul_adapt_strategy_probs>
+      <cumul_campaign_strategy_probs>0.5,0.75,1.0</cumul_campaign_strategy_probs>
    </politicians>
+   <government>
+      <policy_pos_stddiv>2</policy_pos_stddiv>
+      <policy_spread_stddiv>0.01</policy_spread_stddiv>
+      <policy_orientation>real</policy_orientation>
+   </government>
 </stodem>

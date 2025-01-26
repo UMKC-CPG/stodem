@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
 
 
-import os
-
-
 def parameters_and_defaults():
     param_dict = {
-            "infile" : "stodem.in.xml" # String
+            "infile" : "stodem.in.xml", # String
+            "outfile" : "stodem" # String
             }
     return param_dict
 
