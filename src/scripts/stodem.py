@@ -49,27 +49,35 @@ import random
 #   abstract policy or an emotional attitude. The policy dimensions are unbounded
 #   (-infinity, +infinity) with relative positions representing relative degrees of policy
 #   opinion. Absolute values on the number line carry no intrinsic meaning so concepts like
-#   "extreme" and "centrist" are all relative.
+#   "extreme" and "centrist" are all relative. That being said, initial values for the
+#   Gaussians will be distribute with 0 as the mean value or the point about which the
+#   distribution is centered. (This is just for convenience.) The policies themselves are
+#   also completely abstract and have no specific meaning.
 
-# For each dimension, each citizen maintains two values: the stated policy position and
-#   the ideal policy position. The stated policy policy position is the one that the
-#   citizen holds and consciously uses when comparing their policy positions with those
+# For each policy dimension, each citizen maintains two Gaussians: a stated policy position
+#   and an ideal policy position. The stated policy policy position is the one that the
+#   citizen consciously holds and uses when comparing their policy positions with those
 #   of the relevant politicians in preparation for a vote. Similarly, the stated policy
-#   positions are used when comparing their policy positions with those of the government
-#   during the governing phase to compute an opinion about the citizen's satisfaction
-#   with the performance of the government. Further, the stated policy positions are
-#   used when citizens interact with other citizens. On the other hand, the ideal policy
+#   positions are used when comparing the citizen's policy positions with those of the
+#   government during the governing phase to compute an opinion about the citizen's
+#   satisfaction with the performance of the government. Further, the stated policy positions
+#   are used when citizens interact with other citizens. On the other hand, the ideal policy
 #   position is compared to the government policy positions during the governing phase
 #   to compute the citizen's actual well-being. The measure of well-being is used modulate
 #   the political temperature of the citizen. Within this dynamic, a variety of phenomena
-#   may occur.
+#   may occur. (See below.)
 
 # In addition to the policy dimensions, each citizen maintains additional internal
-#   parameters associated with emotional (personality) attitudes.
+#   parameters associated with emotional (personality) attitudes. These operate like the
+#   policy positions. The emotional dimensions are unbounded and the positions represent
+#   a relative degree of affinity for a certain personality attribute. Unlike the policy
+#   positions, citizens only have one position for each dimension. The emotional
+#   attitudes only interact with the personalities of politicians and other citizens.
+#   The government has no emotional position.
 
-# The positions themselves are actually not single values but rather are each expressed as
-#   unit-area Gaussian functions with one parameter that defines the full-width at half the
-#   maximum height and another that defines the position. Further, the Gaussian maintains
+# The emotional and policy positions are not single values but rather are each expressed as
+#   unit-area Gaussian functions with one parameter that defines the standard deviation
+#   (related to FWHM) and another that defines the position. Further, the Gaussian maintains
 #   an orientation understood as a rotation about the real axis into the imaginary axis.
 #   Only the projection of the Gaussian onto the real axis plays a role in determining the
 #   interaction of the citizen's position with other Gaussians (politician, government, or
@@ -83,13 +91,51 @@ import random
 #   has an imaginary orientation, we understand to the signify indifference (neither
 #   attraction nor repulsion) to another Gaussian. Recall, only the real projection of a
 #   citizen's position (Gaussian) will interact with the real projection of the other
-#   Gaussian.
+#   Gaussian. Note, presently, positive or negative imaginary values have the same
+#   interpretation of indifference.
 
-# The
-#   only interacts with the real p
+# The notation for Gaussian functions is as follows:
+#   Pcs;n = citizen stated policy Gaussian for dimension n.
+#   Pci;n = citizen ideal policy Gaussian for dimension n.
+#   Ppa;n = politician apparent policy Gaussian for dimension n.
+#   Pg;n  = government enacted policy Gaussian for dimension m.
+#   Ec;m = citizen emotional Gaussian for dimension m.
+#   Ep;m = politician emotional Gaussian for dimension m.
 
-# Consider the table below:
+# The functional form of our complex Gaussian is:
+#   g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
+# where:
+#   x = the independent variable (arbitray position on the real number line).
+#   sigma = the standard deviation (sigma^2 = the variance).
+#   mu = the point on the real number line of maximum amplitude.
+#   theta = the orientation of the Gaussian about the real number line into the imaginary axis.
+# and other convenient variables are:
+#   FWHM = 2 sqrt(2 ln(2)) * sigma.
+#   alpha = 1/(2 sigma^2)
+#   zeta = alpha_1 + alpha_2 for two Gaussians
+#   xi = 1/(2 zeta)
+#   d = mu_1 - mu_2 for two Gaussians
 
+# The key relationship between any two Gaussians G1, G2 is their overlap integral:
+#   I(G1,G2) = Integral(Re(G1)*Re(G2) dx; -infinity..+infinity)
+#   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2) * cos(theta_1) * cos(theta_2)
+#   The numerical value of this integral is between -1 and +1. The maximum value occurs when
+#   both Gaussians have exactly equal parameters. The minimum value occurs when both
+#   Gaussians have exactly equal parameters except for that theta_1 = 0 or pi/2 and
+#   theta_2 = pi/2 or 0 respectively.
+
+# Interactions and their effects are computed as follows:
+
+# All relevant integral pairs are computed:
+#   I(Pcs,Ppa), (Pcs,Pg), (Ppa,Pg), I(Pci,Pg), I(Ppa,Pg), I(Ec,Ep)
+
+# The I(Ec,Ep) term defined a viscous frictional force between
+
+# Citizen stated policy position <-> politician apparent policy position.
+#  (1) The direct force, I(Pcs,Ppa), is computed for the two Gaussians.
+#  (2) A viscous frictional force is determined
+
+# Gaussians move according to F = ma where m is the area projected onto the real axis.
 
 #A rational citizen would thus have
 #   alignment between their stated policy positions and their ideal policy positions.
