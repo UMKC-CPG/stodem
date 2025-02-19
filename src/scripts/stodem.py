@@ -18,7 +18,7 @@ import random
 # This program is a multi agent based simulation. The agents include politicians and
 #   citizens. The agents populate a two-dimensional world that is divided into a series
 #   of nested user-defined zones. For example, the top-level zone can be considered as
-#   a country and within that top level zone is a collection of state zones. Each
+#   a 'country' and within that top level zone is a collection of 'state' zones. Each
 #   state zone may be composed of a set of district zones. Etc. The world is tiled with
 #   a set of patches such that (ideally) the smallest zone consists of at least a few
 #   dozen patches.
@@ -28,7 +28,7 @@ import random
 #   boundaries may change during the simulation with the constraints that a zone is not
 #   allowed to overlap with another zone of the same level and it is not allowed to cross
 #   a border of a higher level zone. (I.e., a zone cannot be spread across two higher level
-#   zones at the same time.)
+#   zones at the same time such as a single district being part of two states.)
 
 # Each zone is home to some (non-zero) positive number of politicians. The number of
 #   politicians in a zone can change throughout the course of the simulation.
@@ -46,36 +46,90 @@ import random
 # Each citizen exists in a state that is defined by the relationship between its internal
 #   parameters and the external environment. The internal parameters are expressed in a
 #   multi-dimensional complex valued space where each dimension represents either an
-#   abstract policy or an emotional attitude. The policy dimensions are unbounded
-#   (-infinity, +infinity) with relative positions representing relative degrees of policy
-#   opinion. Absolute values on the number line carry no intrinsic meaning so concepts like
-#   "extreme" and "centrist" are all relative. That being said, initial values for the
-#   Gaussians will be distribute with 0 as the mean value or the point about which the
-#   distribution is centered. (This is just for convenience.) The policies themselves are
-#   also completely abstract and have no specific meaning.
+#   abstract policy or a personality trait.
 
-# For each policy dimension, each citizen maintains two Gaussians: a stated policy position
-#   and an ideal policy position. The stated policy policy position is the one that the
-#   citizen consciously holds and uses when comparing their policy positions with those
-#   of the relevant politicians in preparation for a vote. Similarly, the stated policy
-#   positions are used when comparing the citizen's policy positions with those of the
-#   government during the governing phase to compute an opinion about the citizen's
-#   satisfaction with the performance of the government. Further, the stated policy positions
-#   are used when citizens interact with other citizens. On the other hand, the ideal policy
-#   position is compared to the government policy positions during the governing phase
-#   to compute the citizen's actual well-being. The measure of well-being is used modulate
-#   the political temperature of the citizen. Within this dynamic, a variety of phenomena
-#   may occur. (See below.)
+# Each dimension should be envisioned as a one-dimensional real number line that extends
+#   from -infinity to +infinity. The dimensions do not interact with each other and are
+#   independent. I.e., a collection of independent lines as opposed to a high-dimensional
+#   Cartesian axis. An orthogonal imaginary axis is connected to each dimension. Absolute
+#   values on the number line carry no intrinsic meaning so concepts such as "extreme" and
+#   "centrist" are all relative. The policies or personality traits that the dimensions
+#   intend to represent are also completely abstract and have no specific meaning.
 
-# In addition to the policy dimensions, each citizen maintains additional internal
-#   parameters associated with emotional (personality) attitudes. These operate like the
-#   policy positions. The emotional dimensions are unbounded and the positions represent
-#   a relative degree of affinity for a certain personality attribute. Unlike the policy
-#   positions, citizens only have one position for each dimension. The emotional
-#   attitudes only interact with the personalities of politicians and other citizens.
-#   The government has no emotional position.
+# The citizen state parameters are used to define a set of one-dimensional Gaussians.
+#   Each Gaussian has a mid-point located somewhere on the real axis, and a standard
+#   deviation that describes the "spread" of the Gaussian. All Gaussian functions have
+#   unit area, but they may be "rotated" about the real axis into the imaginary plane such
+#   that the area of the projection of the Gaussian on the real axis is less than one
+#   (perhaps even zero). Generally, the Gaussians will always maintain one sign. I.e., if a
+#   Gaussian is initialized positive, it will always remain positive and will never
+#   rotate through the imaginary plane to become negative (and vice-verse for any
+#   Gaussians that are initialized to be negative).
 
-# The emotional and policy positions are not single values but rather are each expressed as
+# The Gaussian functions have slightly different interpretations depending on their
+#   role, but there are general commonalities. Perhaps the best way to understand them is
+#   by example. Consider some policy axis and a Gaussian on it. The center point of the
+#   Gaussian defines a "position" with regard to some abstract policy concept. The position
+#   is extreme or centrist only by reference to all other Gaussians of the other citizens
+#   and politicians. Beause all Gaussians have unit area the standard deviation will
+#   establish the range over which that area is spread. The spread speaks to the degree of
+#   attachment that the citizen or politician has to a specific policy position. E.g., if
+#   the Gaussian is tall and sharp, the implication is that the agent is strongly attached
+#   to that specific position. Alternatively, if the Gaussian is spread wide, then the
+#   implication is that many "nearby" variations on that policy are "acceptable" to the
+#   agent. The degree of rotation out of the real axis controls the total area of the
+#   Gaussian on the real axis (i.e., the projection on the real axis). The interpretation
+#   is that while an agent may hold a position with respect to some policy concept, the
+#   agent is apathetic about that policy concept or that the policy concept is currently
+#   not a priority. So, a Gaussian that has been rotated fully into the imaginary axis
+#   represents that the agent does not take this policy topic into account when making
+#   a voting decision.
+
+# For each policy dimension, each citizen maintains three Gaussians: an ideal policy
+#   position, a stated policy preference, and a policy aversion. Presently, the stated
+#   policy preference and policy aversion are understood to be public, but not
+#   necessarily "widely known". I.e., the opinions of regular citizens tends to only
+#   go as far as their social networks allow and thus are public but not broadcast
+#   beyond their social network. So, we take these Gaussians to represent the citizens'
+#   true opinion and not a public facing presentation of themselves which would require
+#   another set of "internal opinion" Gaussians that represent their true opinions, which
+#   may or may not even be known to themselves. I.e., we are simplifying the meaning and
+#   interpretation of a Gaussian so that just a few can represent the attitude that an
+#   agent can have about a policy dimension.
+
+# In any case...
+
+# The stated policy preference is consciously held by the citizen and is used when comparing
+#   their policy preferences with those of the relevant politicians in preparation for a
+#   vote. Similarly, the stated policy positions are used when comparing the citizen's
+#   policy preferences with the enacted policies of the government during the governing phase
+#   to quantify the citizen's satisfaction with the performance of the government. Further,
+#   the stated policy preferences are used when citizens interact with other citizens.
+
+# The policy aversions work in a similar way to the preferences except that they are
+#   considered to be negative valued. The aversions are compared to the apparent policy
+#   positions of the relevant politicians to help determine how the citizen will vote.
+#   Similarly, the policy aversions are used when comparing the citizen's viewpoint with
+#   the enacted policies of the government during the governing phase. Additionally, the
+#   policy aversions are used when citizens interact with other citizens.
+
+# The ideal policy positions are, on the other hand, a bit different. They are compared to
+#   the government policy positions during the governing phase to compute the citizen's actual
+#   well-being. The measure of well-being is used modulate the political temperature of the
+#   citizen. Within this dynamic, a variety of phenomena may occur. (See below.)
+
+# In addition to the policy dimensions, there are also personality trait dimensions. Each
+#   citizen maintains three Gaussians for each personality trait dimension. One is a
+#   stated personality trait affinity, one is a stated personality trait aversion, and the
+#   last is a 
+#   These operate like the policy positions.
+#   The personality trait dimensions are unbounded and the positions represent a relative
+#   degree of affinity for a certain personality attribute. Unlike the policy positions,
+#   citizens only have one position for each dimension. The personality attitudes only
+#   interact with the personalities of politicians and other citizens. The government has
+#   no personality position.
+
+# The personality and policy positions are not single values but rather are each expressed as
 #   unit-area Gaussian functions with one parameter that defines the standard deviation
 #   (related to FWHM) and another that defines the position. Further, the Gaussian maintains
 #   an orientation understood as a rotation about the real axis into the imaginary axis.
@@ -95,12 +149,16 @@ import random
 #   interpretation of indifference.
 
 # The notation for Gaussian functions is as follows:
-#   Pcs;n = citizen stated policy Gaussian for dimension n.
-#   Pci;n = citizen ideal policy Gaussian for dimension n.
-#   Ppa;n = politician apparent policy Gaussian for dimension n.
-#   Pg;n  = government enacted policy Gaussian for dimension m.
-#   Ec;m = citizen emotional Gaussian for dimension m.
-#   Ep;m = politician emotional Gaussian for dimension m.
+#   Pcp;n = Policy: citizen stated preference Gaussian for dimension n.
+#   Pca;n = Policy: citizen stated aversion Gaussian for dimension n.
+#   Pci;n = Policy: citizen ideal Gaussian for dimension n.
+#   Ppp;n = Policy: politician apparent preference Gaussian for dimension n.
+#   Ppa;n = Policy: politician apparent aversion Gaussian for dimension n.
+#   Pge;n = Policy: government enacted policy Gaussian for dimension m.
+#   Tcp;m = Trait: citizen stated preference Gaussian for dimension m.
+#   Tca;m = Trait: citizen stated aversion Gaussian for dimension m.
+#   Tcx;m = Trait: citizen ...
+#   Tpx;m = Trait: politician personality Gaussian for dimension m.
 
 # The functional form of our complex Gaussian is:
 #   g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
@@ -577,7 +635,7 @@ class Patch():
 
 
 class Citizen():
-    # Citizens have an innate "emotional" position that can change to align with a
+    # Citizens have an innate "personality" position that can change to align with a
     #   politician.
 
     # Citizens have a stated policy position for each policy. This is the policy position
@@ -595,13 +653,13 @@ class Citizen():
     #   may easily be different than whatever number actually benefits them the most.
 
     # Citizens have a probability of participation. It is affected (in no order) by:
-    #   (1) The emotional alignment between a citizen and a politician.
+    #   (1) The personality alignment between a citizen and a politician.
     #   (2) The cumulative policy position alignment between a citizen and a politician.
     #   (3) Whether or not the citizen voted previously.
     #   (4) The number citizens in the same zone that will vote in agreement with the citizen.
     #   (5) The well-being of the citizen.
 
-    # Citizens have a well-being factor that weights the degree to which they will use emotional
+    # Citizens have a well-being factor that weights the degree to which they will use personality
     #   or policy alignment when deciding how to cast their vote.
      
 
@@ -609,7 +667,7 @@ class Citizen():
 
         # Get local names for settings variables.
         num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
-        num_emot_dims = int(settings.infile_dict[1]["world"]["num_emot_dims"])
+        num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
 
         # Define the initial instance variables of this citizen.
         self.participation_prob = \
@@ -633,12 +691,12 @@ class Citizen():
                 loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
                 ["ideal_policy_pos_stddev"])) for x in self.ideal_policy_pos]
         self.policy_consistency = self.policy_alignment()
-        self.emot_pos = rng.normal(loc=0.0,
+        self.trait_pos = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
-                ["emot_pos_stddev"]),size=num_emot_dims)
-        self.policy_emot_ratio = rng.normal(loc=0.0,
+                ["trait_pos_stddev"]),size=num_trait_dims)
+        self.policy_trait_ratio = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_emot_ratio_stddev"]))
+                ["policy_trait_ratio_stddev"]))
         self.current_patch_x = patch.x_location
         self.current_patch_y = patch.y_location
 
@@ -662,8 +720,8 @@ class Citizen():
 
 
 class Politician():
-    # Politicians have an innate "emotional" position on a one-dimensional spectrum. The
-    #   distance between a citizen's emotional position and a politician's emotional position
+    # Politicians have an innate "personality" position on a one-dimensional spectrum. The
+    #   distance between a citizen's personality position and a politician's personality position
     #   will influence (1) the ability of the politician to persuade a citizen with respect to
     #   their policy positions; (2) the probability that a citizen will vote for a politician;
     #   (3) the probability that a citizen will allow policy position misrepresentations to go
@@ -690,7 +748,7 @@ class Politician():
 
         # Get local names for settings variables.
         num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
-        num_emot_dims = int(settings.infile_dict[1]["world"]["num_emot_dims"])
+        num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
 
         # Define the initial instance variables of this politician.
         self.policy_pos = rng.normal(loc=0.0,
@@ -704,24 +762,24 @@ class Politician():
         else:
             print("Unknown politician policy orientation\n")
             exit()
-        self.emot_pos = rng.normal(loc=0.0,
+        self.trait_pos = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
-                ["emot_stddev"]),size=num_emot_dims)
-        self.emot_spread = rng.normal(loc=0.0,
+                ["trait_stddev"]),size=num_trait_dims)
+        self.trait_spread = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
-                ["emot_pos_stddev"]),size=num_emot_dims)
+                ["trait_pos_stddev"]),size=num_trait_dims)
         self.policy_influence = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_influence_stddev"]))
-        self.emot_influence = rng.normal(loc=0.0,
+        self.trait_influence = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
-                ["emot_influence_stddev"]))
+                ["trait_influence_stddev"]))
         self.policy_lie = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_lie_stddev"]))
-        self.emot_lie = rng.normal(loc=0.0,
+        self.trait_lie = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
-                ["emot_lie_stddev"]))
+                ["trait_lie_stddev"]))
         self.pander = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["pander_stddev"]))
@@ -765,11 +823,11 @@ class Politician():
 
 
     def adapt_to_patch(self, world):
-        # Set apparent policy positions and emotional positions according to the strategy
+        # Set apparent policy positions and personality positions according to the strategy
         #   that this politician is following.
         if (self.adapt_strategy == 0):
             self.apparent_policy_pos = self.policy_pos.copy()  # List copy.
-            self.apparent_emot_pos = self.emot_pos  # Float. No need to copy().
+            self.apparent_trait_pos = self.trait_pos  # Float. No need to copy().
 
 
     def persuade(self, world):
@@ -961,12 +1019,12 @@ def campaign(sim_control, world, hdf5):
     #
     # - Politicians move randomly to another patch within the same zone. (Perhaps in the future
     #   politicians could move the more specific locations within their zone.)
-    # - Politicians modify their emotional and policy positions according to the new environment.
-    # - Citizens modify their emotional and policy positions under the influence of the
+    # - Politicians modify their personality and policy positions according to the new environment.
+    # - Citizens modify their personality and policy positions under the influence of the
     #   politician persuasion efforts.
-    # - Citizens modify their emotional and policy positions under the influence of their
+    # - Citizens modify their personality and policy positions under the influence of their
     #   well_being.
-    # - Citizens modify their emotional and policy positions under the influence of their
+    # - Citizens modify their personality and policy positions under the influence of their
     #   fellow citizens.
     # - Citizens make a preliminary assessment about who they will vote for.
 
@@ -994,9 +1052,9 @@ def campaign(sim_control, world, hdf5):
 def vote(sim_control, world):
     # Each citizen decides whether they will vote or not. The participation probability
     #   is initialized at the average participation rate for eligible voters in the USA.
-    # The participation probability will be high when there is strong emotional alignment
+    # The participation probability will be high when there is strong personality alignment
     #   between the citizen and any candidate.
-    # When emotional alignment to all candidates is weak, then the participation probability
+    # When personality alignment to all candidates is weak, then the participation probability
     #   will be low.
     #poor when there is strong misalignment
     #   between the citizen policy positions and the current g
