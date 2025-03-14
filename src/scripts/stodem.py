@@ -82,8 +82,8 @@ import random
 #   is that while an agent may hold a position with respect to some policy concept, the
 #   agent is apathetic about that policy concept or that the policy concept is currently
 #   not a priority. So, a Gaussian that has been rotated fully into the imaginary axis
-#   represents that the agent does not take this policy topic into account when making
-#   a voting decision.
+#   indicates that the agent does not take this policy topic into account when making
+#   a voting decision or campaigning.
 
 # For each policy dimension, each citizen maintains three Gaussians: an ideal policy
 #   position, a stated policy preference, and a policy aversion. Presently, the stated
@@ -119,34 +119,11 @@ import random
 #   citizen. Within this dynamic, a variety of phenomena may occur. (See below.)
 
 # In addition to the policy dimensions, there are also personality trait dimensions. Each
-#   citizen maintains three Gaussians for each personality trait dimension. One is a
-#   stated personality trait affinity, one is a stated personality trait aversion, and the
-#   last is a 
-#   These operate like the policy positions.
-#   The personality trait dimensions are unbounded and the positions represent a relative
-#   degree of affinity for a certain personality attribute. Unlike the policy positions,
-#   citizens only have one position for each dimension. The personality attitudes only
-#   interact with the personalities of politicians and other citizens. The government has
-#   no personality position.
-
-# The personality and policy positions are not single values but rather are each expressed as
-#   unit-area Gaussian functions with one parameter that defines the standard deviation
-#   (related to FWHM) and another that defines the position. Further, the Gaussian maintains
-#   an orientation understood as a rotation about the real axis into the imaginary axis.
-#   Only the projection of the Gaussian onto the real axis plays a role in determining the
-#   interaction of the citizen's position with other Gaussians (politician, government, or
-#   other citizens). Using this approach, a citizen may have a purely real and positive,
-#   purely real and negative, purely imaginary (positive or negative will not matter), or
-#   other orientation in between the aforementioned with some fractional real and imaginary
-#   projections. When a citizen's position has the same real orientation as that of some
-#   other Gaussian (politician, citizen, government), we understand that to represent
-#   attraction. When the position has an oppositely directed real orientation compared to
-#   some other Gaussian, we understand that to represent repulsion. When a citizen's position
-#   has an imaginary orientation, we understand to the signify indifference (neither
-#   attraction nor repulsion) to another Gaussian. Recall, only the real projection of a
-#   citizen's position (Gaussian) will interact with the real projection of the other
-#   Gaussian. Note, presently, positive or negative imaginary values have the same
-#   interpretation of indifference.
+#   citizen maintains two Gaussians for each personality trait dimension. One is a stated
+#   personality trait affinity and the other is a stated personality trait aversion.
+#   Each politician has one personality trait for each dimension. The personality attitudes
+#   only interact with the personalities of politicians and other citizens. The government
+#   has no personality position.
 
 # The notation for Gaussian functions is as follows:
 #   Pcp;n = Policy: citizen stated preference Gaussian for dimension n.
@@ -157,17 +134,20 @@ import random
 #   Pge;n = Policy: government enacted policy Gaussian for dimension m.
 #   Tcp;m = Trait: citizen stated preference Gaussian for dimension m.
 #   Tca;m = Trait: citizen stated aversion Gaussian for dimension m.
-#   Tcx;m = Trait: citizen ...
 #   Tpx;m = Trait: politician personality Gaussian for dimension m.
 
 # The functional form of our complex Gaussian is:
 #   g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
+
 # where:
+
 #   x = the independent variable (arbitray position on the real number line).
 #   sigma = the standard deviation (sigma^2 = the variance).
 #   mu = the point on the real number line of maximum amplitude.
 #   theta = the orientation of the Gaussian about the real number line into the imaginary axis.
+
 # and other convenient variables are:
+
 #   FWHM = 2 sqrt(2 ln(2)) * sigma.
 #   alpha = 1/(2 sigma^2)
 #   zeta = alpha_1 + alpha_2 for two Gaussians
@@ -182,18 +162,109 @@ import random
 #   Gaussians have exactly equal parameters except for that theta_1 = 0 or pi/2 and
 #   theta_2 = pi/2 or 0 respectively.
 
+# Certain integral groups can be identified:
+# The comprehensive citizen-politician integration set is I(Pcp;n,Ppp;n), I(Pca;n,Ppa;n),
+#   I(Pcp;n,Ppa;n), and I(Pca;n,Ppp;n) for each policy (n) and I(Tcp;m,Tpx;m) and
+#   I(Tca;m,Tpx;m) for each personality trait (m). These integrals may be used seperately
+#   or summed. Further, the sum of policy integrals may be added to the sum of trait
+#   integrals according to a weighting factor.
+#
+# Subsets of the comprehensive citizen-politician integration set include:
+#   ***Mutual policy agreement set: I(Pcp;n,Ppp;n) for each policy (n). By construction,
+#   all values will be positive. The minimum for any one integral is zero when either a
+#   citizen or a politician has a fully imaginary Gaussian (so that the real projection
+#   is zero). The maximum value is 1 for when the two Gaussian exactly overlap.
+#
+#   ***Mutual policy aversion set: I(Pca;n,Ppa;n) for each policy (n). By construction,
+#   all values will be positive (both Gaussians have negative orientation and thus the
+#   sign cancels) but otherwise they are the same as the mutual policy agreement set.
+#
+#   ***Policy Disagreement set: I(Pca;n,Ppp;n) and I(Pcp;n,Ppa;n) for each policy (n).
+#   By construction, all values will be negative because in each case one Gaussian is
+#   positive and one is negative.
+#
+# The comprehensive citizen-citizen integration set is I(Pcp;n,Pcp;n), I(Pca;n,Pca;n),
+#   I(Pcp;n,Pca;n), and I(Pca;n,Pcp;n) for each policy (n) and I(Tcp;m,Tcp;m),
+#   I(Tca;m,Tca;m), I(Tcp;m,Tca;m), and I(Tca;m,Tcp;m) for each personality trait (m).
+#   Each citizen will perform these integrals between themselves and the average form
+#   of each Gaussian within each zone that the citizen inhabits. The average position
+#   is simply the average position determined by using all citizens in the zone. The
+#   average standard deviation is the actual standard deviation of the positions and
+#   the average standard deviation determined by using an average of that value from
+#   all cvitizens in the zone.
+
 # Interactions and their effects are computed as follows:
 
-# All relevant integral pairs are computed:
-#   I(Pcs,Ppa), (Pcs,Pg), (Ppa,Pg), I(Pci,Pg), I(Ppa,Pg), I(Ec,Ep)
+# Voting phase:
+# A citizen decides who to vote for by computing the comprehensive citizen-politician
+#   integration set for each eligible politician. The accumulated and weighted (policy vs.
+#   trait) sum that has the highest positive value will be the politician that the person
+#   votes for. The weighting factor will depend on the "satisfaction" that the citizen has
+#   for the current "state of things".
 
-# The I(Ec,Ep) term defined a viscous frictional force between
+# Campaigning phase:
+# A campaign is an interaction between the politicians and the citizens. In principle,
+#   however, all parties interact with each other.
+# An interaction between a politician and a citizen occurs when they are on the same patch.
+#
+#   Politician-driven citizen engagement (real vs. imaginary policy and trait positions):
+#   The comprehensive citizen-politician integration set for that politician-citizen pair
+#   is computed. The degree of overlap of every integral is used to orient the citizen's
+#   Gaussian more into the real axis. I.e., if I(Pcp,Ppp) has strong overlap, then the
+#   citizen's Pcp Gaussian (for that policy) will turn strongly real. If I(Pca,Ppp) has a
+#   strong overlap, then the citizen's Pca Gaussian (for that policy) will turn strongly
+#   real. Weak overlap leads to a weak turn. 
+#
+#   Politician-driven citizen policy shifts and spreads:
+#   The sum of trait integrals can influence the positions of the Gaussians for the citizen
+#   policy prefrences and aversions. If the sum of trait integrals is positive then the
+#   citizen's policy preference Gaussians will move toward the respective policy positions
+#   of the politician. Additionally, the Gaussian standard deviation will change to align
+#   more with that of the politician. Similarly, for a positive trait integral sum, the
+#   citizen's policy aversion Gaussians will change (position and standard deviation) to
+#   align more with the politician. If the sum of trait integrals is negative, then the
+#   citizen's policy preference Gaussian standard deviations will narrow and the policy
+#   aversion Gaussian standard deviations will broaden, however, neither will move. The
+#   idead is: if the citizen likes the politician based on trait alignment, then the
+#   politician can sway the citizen toward their viewpoint. Alternatively, if the citizen
+#   dislikes the politician, then the citizen will not change their own viewpoint preference
+#   position but will instead sharpen their viewpoint and broaden their policy aversions.
+#
+#   Politician-driven citizen trait shifts and spreads:
+#   There is no direct driver between a politician and the citizen preferences/aversions
+#   of personality traits. I.e., while personality traits drive policy preference and
+#   aversion changes in citizens, there is no opposite action whereby citizen personality
+#   preferences/aversions are changed by any policy or trait state of a politician.
+#   Citizen trait preferences/aversions are influenced by the degree to which other
+#   citizens are attracted to or repelled by the politician.
+#
+#   Citizen-driven citizen policy shifts and spreads:
+#   The comprehensive citizen-citizen integration set is used independently for each
+#   policy position/aversion. Based on each number, the citizen changes their position
+#   and standard deviation for each Gaussian.
+#   The sum of policy integrals (between the citizen and the average Gaussian forms from
+#   each zone) may be either positive or negative. Regardless, each citizen will be
+#   attracted toward average form to a degree. I.e., everyone acclimates to and migrates
+#   toward the average community behavior. Consider a few different scenarios: (1) everyone has
+#   sharp Gaussians at the same position. (2) everyone has sharp Gaussians at different
+#   positions. (3) Broad Gaussians in one position. (4) Broad Gaussians in many different
+#   positions.
 
-# Citizen stated policy position <-> politician apparent policy position.
-#  (1) The direct force, I(Pcs,Ppa), is computed for the two Gaussians.
-#  (2) A viscous frictional force is determined
+#   
+#   negative->away) 
+# Politicians want to get elected.
+# Politicians attempt to influence citizens directly and indirectly.
+# Direct influence
+# When a politician in on the same patch as a citizen, they compute a direct influence
+#   in the form of the integrals I(Pcp,Ppp), I(Pca,Ppa), I(Pcp,Ppa), and I(Pca,Ppp). influences a citizen
 
-# Gaussians move according to F = ma where m is the area projected onto the real axis.
+# Governing phase:
+# A citizen is "happy" when:
+# (1) There is alignment between their stated policy preferences and the enacted policies
+#     of the govenment.
+# (2) The politicians that they voted for are in office.
+# (3) The "economic environment" is good for the individual. This is measured by the
+#     alignment 
 
 #A rational citizen would thus have
 #   alignment between their stated policy positions and their ideal policy positions.
