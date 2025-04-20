@@ -25,7 +25,7 @@ import random
 
 # The zones may be classified as fixed or flexible. If a zone is fixed, then its boundaries
 #   will remain constant throughout the simulation. If a zone is flexible, then its
-#   boundaries may change during the simulation with the constraints that a zone is not
+#   boundaries may change during the simulation with the constraint that a zone is not
 #   allowed to overlap with another zone of the same level and it is not allowed to cross
 #   a border of a higher level zone. (I.e., a zone cannot be spread across two higher level
 #   zones at the same time such as a single district being part of two states.)
@@ -694,6 +694,13 @@ class Zone():
         # Each zone maintains a list of the politicians who vie for election in it.
         self.politician_list = []
 
+        # Each zone maintains a list of the citizen average values for policy and
+        #   trait preference and aversion.
+        self.avg_Pcp = [] # Three elements for each policy: pos, stddv, and orien
+        self.avg_Pca = [] # Three elements for each policy: pos, stddv, and orien
+        self.avg_Tcp = [] # Three elements for each trait: pos, stddv, and orien
+        self.avg_Tca = [] # Three elements for each trait: pos, stddv, and orien
+
 
     def add_politician(self, politician):
         self.politician_list.append(politician)
@@ -785,11 +792,17 @@ class Citizen():
         # Define instance variables given in the input file.
         self.participation_prob = \
                 float(settings.infile_dict[1]["citizens"]["participation_prob"])
-        self.stated_policy_pref = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]["policy_pref_stddev"]),
+        self.stated_policy_pref_pos = rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["policy_pref_pos_stddev"]),
                 size=num_policy_dims)
-        self.stated_policy_aver = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]["policy_aver_stddev"]),
+        self.stated_policy_aver_pos = rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["policy_aver_pos_stddev"]),
+                size=num_policy_dims)
+        self.stated_policy_pref_stddev = rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["policy_pref_stddev_stddev"]),
+                size=num_policy_dims)
+        self.stated_policy_aver_stddev = rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["policy_aver_stddev_stddev"]),
                 size=num_policy_dims)
         if (settings.infile_dict[1]["citizens"]["policy_orientation"] == "imaginary"):
             # Create random integers between 0 and 1 inclusive. Then multiply by 2
@@ -803,17 +816,27 @@ class Citizen():
         else:
             print("Unknown citizen policy orientation\n")
             exit()
-        self.ideal_policy_pref = self.stated_policy_pref.copy()
-        self.ideal_policy_pref = [x + rng.normal(
+        self.ideal_policy_pref_pos = self.stated_policy_pref_pos.copy()
+        self.ideal_policy_pref_pos = [x + rng.normal(
                 loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
-                ["ideal_policy_pref_stddev"])) for x in self.ideal_policy_pref]
+                ["ideal_policy_pref_pos_stddev"])) for x in self.ideal_policy_pref_pos]
+        self.ideal_policy_pref_stddev = [int(settings.infile_dict[1]["citizens"]
+                ["ideal_policy_pref_stddev"]) for x in num_policy_dims]
+        self.ideal_policy_pref_orien = [1 + 0j for x in num_policy_dims]
+
         self.policy_consistency = self.policy_alignment()
-        self.trait_pref = rng.normal(loc=0.0,
+        self.trait_pref_pos = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_pref_stddev"]),size=num_trait_dims)
-        self.trait_aver = rng.normal(loc=0.0,
+                ["trait_pref_pos_stddev"]),size=num_trait_dims)
+        self.trait_aver_pos = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_aver_stddev"]),size=num_trait_dims)
+                ["trait_aver_pos_stddev"]),size=num_trait_dims)
+        self.trait_pref_stddev = abs(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]
+                ["trait_pref_stddev_stddev"]),size=num_trait_dims))
+        self.trait_aver_stddev = abs(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]
+                ["trait_aver_stddev_stddev"]),size=num_trait_dims))
         self.policy_trait_ratio = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
                 ["policy_trait_ratio_stddev"]))
@@ -831,25 +854,145 @@ class Citizen():
         self.politician_list.clear()
 
 
-    def compute_all_overlaps(self):
+    def compute_all_overlaps(self, world):
+
+        # Initialize the integral solution lists.
+        self.initialize_lists()
+
+        # Compute the integrals between the current self citizen and all relevant
+        #   politicians
+        self.policy_politician_integrals()
+        self.trait_politician_integrals()
+
+        # Assume that the citizen zone averages have been computed. Then compute
+        #   the integrals between the current self citizen and all the relevant
+        #   citizen zone averages.
+        self.policy_citizen_integrals()
+        self.trait_citizen_integrals()
+
+        # Compute the integrals between the current self citizen and all
+        #   government enacted policies.
+        self.policy_government_integrals(world)
+
+
+    def initialize_lists(self):
+
+        # Initialize lists that will hold overlap integral solutions between citizen
+        #   and politicians (policy and trait, preference and aversion).
+        self.Pcp_Ppp_ol = [] # Policy: citizen preference vs politician preference
+        self.Pcp_Ppa_ol = [] # Policy: citizen preference vs politician aversion
+        self.Pca_Ppp_ol = [] # Policy: citizen aversion vs politician preference
+        self.Pca_Ppa_ol = [] # Policy: citizen aversion vs politician aversion
+        self.Tcp_Tpx_ol = [] # Trait: citizen preference vs politician external
+        self.Tca_Tpx_ol = [] # Trait: citizen aversion vs politician external
+
+        # Initialize lists that will hold overlap integral solutions between citizen
+        #   and the zone average values of other citizens for both policies and traits
+        self.Pcp_Pcp_ol = [] # Policy: citizen preference vs zone avg citizen preference
+        self.Pcp_Pca_ol = [] # Policy: citizen preference vs zone avg citizen aversion
+        self.Pca_Pcp_ol = [] # Policy: citizen aversion vs zone avg citizen preference
+        self.Pca_Pca_ol = [] # Policy: citizen aversion vs zone avg citizen aversion
+        self.Tcp_Tcp_ol = [] # Trait: citizen preference vs zone avg citizen preference
+        self.Tcp_Tca_ol = [] # Trait: citizen preference vs zone avg citizen aversion
+        self.Tca_Tcp_ol = [] # Trait: citizen aversion vs zone avg citizen preference
+        self.Tca_Tca_ol = [] # Trait: citizen aversion vs zone avg citizen aversion
+
+        # Initialize lists that will hold overlap integral solutions between citizen
+        #   and the government policies.
+        self.Pcp_Pge_ol = [] # Policy: citizen preference vs government enacted
+        self.Pca_Pge_ol = [] # Policy: citizen aversion vs government enacted
+        self.Pci_Pge_ol = [] # Policy: citizen ideal vs government enacted
+
+
+    def policy_politician_integrals(self):
+
         # Compute the overlaps between the citizen and each relevant politician.
         for politician in self.politician_list:
-            # Initialize lists that will hold overlap integral solutions.
 
-            # Obtain the overlap between
+            # Obtain the overlap between each citizen policy preference and aversion
+            #   and each politician policy preference and aversion.
+            self.Pcp_Ppp_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
+                    self.Pcp_orien, politician.Ppp_pos, politician.Ppp_stddv,
+                    self.Ppp_orien))
+            self.Pca_Ppa_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
+                    self.Pca_orien, politician.Ppa_pos, politician.Ppa_stddv,
+                    self.Ppa_orien))
+            self.Pcp_Ppa_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
+                    self.Pcp_orien, politician.Ppa_pos, politician.Ppa_stddv,
+                    self.Ppa_orien))
+            self.Pca_Ppp_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
+                    self.Pca_orien, politician.Ppp_pos, politician.Ppp_stddv,
+                    self.Ppp_orien))
 
-        # Compute the overlaps between the citizen and 
+
+    def trait_politician_integrals(self):
+
+        # Compute the overlaps between the citizen and each relevant politician.
+        for politician in self.politician_list:
+
+            # Obtain the overlap between each citizen trait preference and aversion
+            #   and each politician externally exposed trait.
+            self.Tcp_Tpx_ol.append(compute_overlap(self.Tcp_pos, self.Tcp_stddv,
+                    self.Tcp_orien, politician.Tpx_pos, politician.Tpx_stddv,
+                    self.Tpx_orien))
+            self.Tca_Tpx_ol.append(compute_overlap(self.Tca_pos, self.Tca_stddv,
+                    self.Tca_orien, politician.Tpx_pos, politician.Tpx_stddv,
+                    self.Tpx_orien))
+
+
+    def policy_citizen_integrals(self):
+
+        for zone in self.patch.zone_index:
+            # Obtain the overlap between each citizen policy preference and aversion
+            #   and the zone average values across all citizen of the zone.
+            self.Pcp_Pcp_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
+                    self.Pcp_orien, zone.avg_Pcp[0], zone.avg_Pcp[1], zone.avg_Pcp[2]))
+            self.Pca_Pca_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
+                    self.Pca_orien, zone.avg_Pca[0], zone.avg_Pca[1], zone.avg_Pca[2]))
+            self.Pcp_Pca_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
+                    self.Pcp_orien, zone.avg_Pca[0], zone.avg_Pca[1], zone.avg_Pca[2]))
+            self.Pca_Pcp_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
+                    self.Pca_orien, zone.avg_Pcp[0], zone.avg_Pcp[1], zone.avg_Pcp[2]))
+
+
+    def trait_citizen_integrals(self):
+
+        for zone in self.patch.zone_index:
+            # Obtain the overlap between each citizen trait preference and aversion
+            #   and the zone average values across all citizen of the zone.
+            self.Tcp_Tcp_ol.append(compute_overlap(self.Tcp_pos, self.Tcp_stddv,
+                    self.Tcp_orien, zone.avg_Tcp[0], zone.avg_Tcp[1], zone.avg_Tcp[2]))
+            self.Tca_Tca_ol.append(compute_overlap(self.Tca_pos, self.Tca_stddv,
+                    self.Tca_orien, zone.avg_Tca[0], zone.avg_Tca[1], zone.avg_Tca[2]))
+            self.Tcp_Tca_ol.append(compute_overlap(self.Tcp_pos, self.Tcp_stddv,
+                    self.Tcp_orien, zone.avg_Tca[0], zone.avg_Tca[1], zone.avg_Tca[2]))
+            self.Tca_Tcp_ol.append(compute_overlap(self.Tca_pos, self.Tca_stddv,
+                    self.Tca_orien, zone.avg_Tcp[0], zone.avg_Tcp[1], zone.avg_Tcp[2]))
+
+
+    def policy_government_integrals(self, world):
+            
+        # Compute the overlaps between the citizen and the enacted policies of the
+        #   government.
+        self.Pcp_Pge_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
+                self.Pcp_orien, world.government.policy_pos,
+                world.government.policy_stddv, world.government.policy_orien))
+        self.Pca_Pge_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
+                self.Pca_orien, world.government.policy_pos,
+                world.government.policy_stddv, world.government.policy_orien))
+        self.Pci_Pge_ol.append(compute_overlap(self.Pci_pos, self.Pci_stddv,
+                self.Pci_orien, world.government.policy_pos,
+                world.government.policy_stddv, world.government.policy_orien))
 
 
     def respond_to_politician_influence(self):
+
+        # Consider each politician that this citizen could vote for from each zone.
         for politician in self.politician_list:
-            # Initialize lists that will hold overlap integral solutions.
-
-            # Obtain the overlap between
 
 
-    def initialize_one_overlap(self, overlap_list, dimension):
-        overlap_list = [[[0 for z in range(self.)] for y in range(self.num_zones)] for x in range(dimension)]
+    def initialize_one_overlap(self, dimensions, entities):
+        return [[0 for z in range(dimensions)] for y in range(len(entities))]
 
 
     def initialize_all_overlaps(self):
@@ -1041,8 +1184,8 @@ class Government():
     # Define class variables.
     num_policy_dims = 0
     policy_pos = []
-    policy_spread = []
-    policy_orientation = []
+    policy_stddv = []
+    policy_orien = []
 
     def __init__(self, settings):
         Government.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
@@ -1058,11 +1201,11 @@ class Government():
 # Mathematical form:
 #  g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
 class Gaussian():
-    def __init__(self, expected_value, stddev, angle):
+    def __init__(self, pos, stddv, orien):
         # Create instance variables.
-        mu = expected_value
-        sigma = stddev
-        theta = angle
+        self.mu = pos
+        self.sigma = stddev
+        self.theta = orien
 
     def integral(self, g):
         # Get the real parts of the self and g (given) Gaussians.
@@ -1195,6 +1338,15 @@ class Xdmf():
         Xdmf.x.close()
 
 
+def compute_overlap(pos_1, stddv_1, orien_1, pos_2, stddv_2, orien_2):
+
+    # Integrate the Gaussian arrays.
+    alpha_1 = 1.0 / (2.0 * stddv_1**2)
+    alpha_2 = 1.0 / (2.0 * stddv_2**2)
+    zeta = alpha_1 + alpha_2
+    integral = np.pi
+
+
 def campaign(sim_control, world, hdf5):
 
     # One-time activities as the start of a campaign.
@@ -1223,6 +1375,10 @@ def campaign(sim_control, world, hdf5):
         #   new environment.
         for politician in world.politicians:
             politician.adapt_to_patch(world)
+
+        # - Citizens compute all the necessary overlap integrals.
+        for citizen in world.citizens:
+            citizen.compute_all_overlaps()
 
         # - Citizens modify their personality and policy positions under the influence of the
         #   politician persuasion efforts.
