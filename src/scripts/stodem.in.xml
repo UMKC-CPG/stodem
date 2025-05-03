@@ -9,7 +9,7 @@
    <world>
       <patch_size>5</patch_size>
       <num_policy_dims>5</num_policy_dims>
-      <num_emot_dims>3</num_emot_dims>
+      <num_trait_dims>3</num_trait_dims>
       <num_zone_types>3</num_zone_types>
       <zone_type_0>
          <name>district</name>
@@ -19,7 +19,7 @@
          <min_politicians>2</min_politicians>
          <max_politicians>10</max_politicians>
          <num_politicians_mean>2.3</num_politicians_mean>
-         <num_politicians_stddiv>1.0</num_politicians_stddiv>
+         <num_politicians_stddev>1.0</num_politicians_stddev>
       </zone_type_0>
       <zone_type_1>
          <name>state</name>
@@ -29,7 +29,7 @@
          <min_politicians>2</min_politicians>
          <max_politicians>10</max_politicians>
          <num_politicians_mean>2.3</num_politicians_mean>
-         <num_politicians_stddiv>1.0</num_politicians_stddiv>
+         <num_politicians_stddev>1.0</num_politicians_stddev>
       </zone_type_1>
       <zone_type_2>
          <name>country</name>
@@ -39,40 +39,49 @@
          <min_politicians>2</min_politicians>
          <max_politicians>10</max_politicians>
          <num_politicians_mean>2.3</num_politicians_mean>
-         <num_politicians_stddiv>1.0</num_politicians_stddiv>
+         <num_politicians_stddev>1.0</num_politicians_stddev>
       </zone_type_2>
    </world>
    <patch>
       <initial_num_citizens>5</initial_num_citizens>
    </patch>
    <citizens>
-      <policy_pos_stddiv>2</policy_pos_stddiv>
-      <policy_spread_stddiv>2</policy_spread_stddiv>
-      <policy_orientation>imaginary</policy_orientation>
-      <ideal_policy_pos_stddiv>2</ideal_policy_pos_stddiv>
-      <emot_pos_stddiv>2</emot_pos_stddiv>
-      <emot_spread_stddiv>2</emot_spread_stddiv>
-      <policy_emot_ratio_stddiv>0.2</policy_emot_ratio_stddiv>
+      <policy_pref_pos_stddev>2</policy_pref_pos_stddev>
+      <policy_pref_stddev_stddev>2</policy_pref_stddev_stddev>
+      <policy_pref_orien_stddev>imaginary</policy_pref_orien_stddev>
+      <policy_aver_pos_stddev>2</policy_aver_pos_stddev>
+      <policy_aver_stddev_stddev>2</policy_aver_stddev_stddev>
+      <policy_aver_orien_stddev>imaginary</policy_aver_orien_stddev>
+      <ideal_policy_pref_pos_stddev>2</ideal_policy_pref_pos_stddev>
+      <ideal_policy_pref_stddev_stddev>0.01</ideal_policy_pref_stddev_stddev>
+      <ideal_policy_pref_orien_stddev>imaginary</ideal_policy_pref_orien_stddev>
+      <trait_pref_pos_stddev>2</trait_pref_pos_stddev>
+      <trait_pref_stddev_stddev>2</trait_pref_stddev_stddev>
+      <trait_pref_orien_stddev>imaginary</trait_pref_orien_stddev>
+      <trait_aver_pos_stddev>2</trait_aver_pos_stddev>
+      <trait_aver_stddev_stddev>2</trait_aver_stddev_stddev>
+      <trait_aver_orien_stddev>imaginary</trait_aver_orien_stddev>
+      <policy_trait_ratio_stddev>0.2</policy_trait_ratio_stddev>
       <participation_prob>0.65</participation_prob>
    </citizens>
    <politicians>
-      <policy_pos_stddiv>2</policy_pos_stddiv>
-      <policy_spread_stddiv>2</policy_spread_stddiv>
-      <policy_orientation>uniform</policy_orientation>
-      <emot_pos_stddiv>2</emot_pos_stddiv>
-      <emot_spread_stddiv>2</emot_spread_stddiv>
-      <policy_influence_stddiv>2</policy_influence_stddiv>
-      <emot_influence_stddiv>2</emot_influence_stddiv>
-      <policy_lie_stddiv>2</policy_lie_stddiv>
-      <emot_lie_stddiv>2</emot_lie_stddiv>
-      <pander_stddiv>2</pander_stddiv>
+      <policy_pos_stddev>2</policy_pos_stddev>
+      <policy_stddev_stddev>2</policy_stddev_stddev>
+      <policy_orien>uniform</policy_orien>
+      <trait_pos_stddev>2</trait_pos_stddev>
+      <trait_stddev_stddev>2</trait_stddev_stddev>
+      <policy_influence_stddev>2</policy_influence_stddev>
+      <trait_influence_stddev>2</trait_influence_stddev>
+      <policy_lie_stddev>2</policy_lie_stddev>
+      <trait_lie_stddev>2</trait_lie_stddev>
+      <pander_stddev>2</pander_stddev>
       <cumul_move_strategy_probs>0.5,0.75,1.0</cumul_move_strategy_probs>
       <cumul_adapt_strategy_probs>0.5,0.75,1.0</cumul_adapt_strategy_probs>
       <cumul_campaign_strategy_probs>0.5,0.75,1.0</cumul_campaign_strategy_probs>
    </politicians>
    <government>
-      <policy_pos_stddiv>2</policy_pos_stddiv>
-      <policy_spread_stddiv>0.01</policy_spread_stddiv>
-      <policy_orientation>real</policy_orientation>
+      <policy_pos_stddev>2</policy_pos_stddev>
+      <policy_stddev_stddev>0.01</policy_stddev_stddev>
+      <policy_orien>real</policy_orien>
    </government>
 </stodem>

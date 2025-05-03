@@ -9,6 +9,7 @@ from lxml import etree
 from dataclasses import dataclass
 import numpy as np
 import h5py as h5
+import math as m
 import random
 
 # Discussion:
@@ -46,12 +47,11 @@ import random
 # Each citizen exists in a state that is defined by the relationship between its internal
 #   parameters and the external environment. The internal parameters are expressed in a
 #   multi-dimensional complex valued space where each dimension represents either an
-#   abstract policy or a personality trait.
+#   abstract policy or an abstract personality trait.
 
 # Each dimension should be envisioned as a one-dimensional real number line that extends
 #   from -infinity to +infinity. The dimensions do not interact with each other and are
-#   independent. I.e., a collection of independent lines as opposed to a high-dimensional
-#   Cartesian axis. An orthogonal imaginary axis is connected to each dimension. Absolute
+#   independent. An orthogonal imaginary axis is connected to each dimension. Absolute
 #   values on the number line carry no intrinsic meaning so concepts such as "extreme" and
 #   "centrist" are all relative. The policies or personality traits that the dimensions
 #   intend to represent are also completely abstract and have no specific meaning.
@@ -79,7 +79,8 @@ import random
 #   implication is that many "nearby" variations on that policy are "acceptable" to the
 #   agent. The degree of rotation out of the real axis controls the total area of the
 #   Gaussian on the real axis (i.e., the projection on the real axis). The interpretation
-#   is that while an agent may hold a position with respect to some policy concept, the
+#   of a Gaussian that has been rotated out of the real plane and into the imaginary is
+#   that while an agent may hold a position with respect to some policy concept, the
 #   agent is apathetic about that policy concept or that the policy concept is currently
 #   not a priority. So, a Gaussian that has been rotated fully into the imaginary axis
 #   indicates that the agent does not take this policy topic into account when making
@@ -87,15 +88,13 @@ import random
 
 # For each policy dimension, each citizen maintains three Gaussians: an ideal policy
 #   position, a stated policy preference, and a policy aversion. Presently, the stated
-#   policy preference and policy aversion are understood to be public, but not
-#   necessarily "widely known". I.e., the opinions of regular citizens tends to only
-#   go as far as their social networks allow and thus are public but not broadcast
-#   beyond their social network. So, we take these Gaussians to represent the citizens'
-#   true opinion and not a public facing presentation of themselves which would require
-#   another set of "internal opinion" Gaussians that represent their true opinions, which
-#   may or may not even be known to themselves. I.e., we are simplifying the meaning and
-#   interpretation of a Gaussian so that just a few can represent the attitude that an
-#   agent can have about a policy dimension.
+#   policy preference and policy aversion are understood to be public and available for
+#   averaging across all citizens. So, we take these Gaussians to represent the citizens'
+#   true opinion and not a self-curated "presentation" of themselves which would require
+#   another set of "internal opinion" Gaussians that represent their true opinions. On
+#   the other hand, the ideal policy position is only indirectly known to the citizen.
+#   Therefore, a citizen can have a stated preference that is inconsistent with the
+#   ideal position for the citizen.
 
 # In any case...
 
@@ -783,7 +782,7 @@ class Citizen():
 
     def __init__(self, settings, patch):
 
-        # Get local names for settings variables.
+        # Get temporary local names for settings variables.
         num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
         num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
 
@@ -792,51 +791,87 @@ class Citizen():
         # Define instance variables given in the input file.
         self.participation_prob = \
                 float(settings.infile_dict[1]["citizens"]["participation_prob"])
-        self.stated_policy_pref_pos = rng.normal(loc=0.0,
+
+        self.stated_policy_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_pref_pos_stddev"]),
-                size=num_policy_dims)
-        self.stated_policy_aver_pos = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]["policy_aver_pos_stddev"]),
-                size=num_policy_dims)
-        self.stated_policy_pref_stddev = rng.normal(loc=0.0,
+                size=num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_pref_stddev_stddev"]),
-                size=num_policy_dims)
-        self.stated_policy_aver_stddev = rng.normal(loc=0.0,
+                size=num_policy_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=num_policy_dims)*2 - 1) * 1j)
+
+        self.stated_policy_aver = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["policy_aver_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_aver_stddev_stddev"]),
-                size=num_policy_dims)
-        if (settings.infile_dict[1]["citizens"]["policy_orientation"] == "imaginary"):
-            # Create random integers between 0 and 1 inclusive. Then multiply by 2
-            #   and subtract 1 (in that order) to get random values of -1 or 1. Finally,
-            #   multiply by the imaginary number (1j) to initialize citizen policy
-            #   positions. (Citizens initially have no policy engagement.)
-            self.stated_policy_pref_orien= (rng.integers(low=0, high=1, endpoint=True,
-                    size=num_policy_dims)*2 - 1) * 1j
-            self.stated_policy_aver_orien= (rng.integers(low=0, high=1, endpoint=True,
-                    size=num_policy_dims)*2 - 1) * 1j
-        else:
-            print("Unknown citizen policy orientation\n")
-            exit()
-        self.ideal_policy_pref_pos = self.stated_policy_pref_pos.copy()
-        self.ideal_policy_pref_pos = [x + rng.normal(
+                size=num_policy_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=num_policy_dims)*2 - 1) * 1j)
+
+        self.ideal_policy_pref = Gaussian([x + rng.normal(
                 loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
-                ["ideal_policy_pref_pos_stddev"])) for x in self.ideal_policy_pref_pos]
-        self.ideal_policy_pref_stddev = [int(settings.infile_dict[1]["citizens"]
-                ["ideal_policy_pref_stddev"]) for x in num_policy_dims]
-        self.ideal_policy_pref_orien = [1 + 0j for x in num_policy_dims]
+                ["ideal_policy_pref_pos_stddev"])) for x in self.stated_policy_pref.mu],
+                rng.normal(loc=0.0, [int(settings.infile_dict[1]["citizens"]
+                ["ideal_policy_pref_stddev"]) for x in num_policy_dims]), 
+                [1 + 0j for x in num_policy_dims])
+
+        self.stated_trait_pref = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["trait_pref_pos_stddev"]),
+                size=num_trait_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["trait_pref_stddev_stddev"]),
+                size=num_trait_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=num_trait_dims)*2 - 1) * 1j)
+
+        self.stated_trait_aver = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["trait_aver_pos_stddev"]),
+                size=num_trait_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]["trait_aver_stddev_stddev"]),
+                size=num_trait_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=num_trait_dims)*2 - 1) * 1j)
+
+        #self.stated_policy_pref_pos = rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]["policy_pref_pos_stddev"]),
+        #        size=num_policy_dims)
+        #self.stated_policy_aver_pos = rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]["policy_aver_pos_stddev"]),
+        #        size=num_policy_dims)
+        #self.stated_policy_pref_stddev = rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]["policy_pref_stddev_stddev"]),
+        #        size=num_policy_dims)
+        #self.stated_policy_aver_stddev = rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]["policy_aver_stddev_stddev"]),
+        #        size=num_policy_dims)
+        #if (settings.infile_dict[1]["citizens"]["policy_orientation"] == "imaginary"):
+        #    # Create random integers between 0 and 1 inclusive. Then multiply by 2
+        #    #   and subtract 1 (in that order) to get random values of -1 or 1. Finally,
+        #    #   multiply by the imaginary number (1j) to initialize citizen policy
+        #    #   positions. (Citizens initially have no policy engagement.)
+        #    self.stated_policy_pref_orien= (rng.integers(low=0, high=1, endpoint=True,
+        #            size=num_policy_dims)*2 - 1) * 1j
+        #    self.stated_policy_aver_orien= (rng.integers(low=0, high=1, endpoint=True,
+        #            size=num_policy_dims)*2 - 1) * 1j
+        #else:
+        #    print("Unknown citizen policy orientation\n")
+        #    exit()
+        #self.ideal_policy_pref_pos = self.stated_policy_pref_pos.copy()
+        #self.ideal_policy_pref_pos = [x + rng.normal(
+        #        loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
+        #        ["ideal_policy_pref_pos_stddev"])) for x in self.ideal_policy_pref_pos]
+        #self.ideal_policy_pref_stddev = [int(settings.infile_dict[1]["citizens"]
+        #        ["ideal_policy_pref_stddev"]) for x in num_policy_dims]
+        #self.ideal_policy_pref_orien = [1 + 0j for x in num_policy_dims]
 
         self.policy_consistency = self.policy_alignment()
-        self.trait_pref_pos = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_pref_pos_stddev"]),size=num_trait_dims)
-        self.trait_aver_pos = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_aver_pos_stddev"]),size=num_trait_dims)
-        self.trait_pref_stddev = abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_pref_stddev_stddev"]),size=num_trait_dims))
-        self.trait_aver_stddev = abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_aver_stddev_stddev"]),size=num_trait_dims))
+        #self.trait_pref_pos = rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]
+        #        ["trait_pref_pos_stddev"]),size=num_trait_dims)
+        #self.trait_aver_pos = rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]
+        #        ["trait_aver_pos_stddev"]),size=num_trait_dims)
+        #self.trait_pref_stddev = abs(rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]
+        #        ["trait_pref_stddev_stddev"]),size=num_trait_dims))
+        #self.trait_aver_stddev = abs(rng.normal(loc=0.0,
+        #        scale=float(settings.infile_dict[1]["citizens"]
+        #        ["trait_aver_stddev_stddev"]),size=num_trait_dims))
         self.policy_trait_ratio = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
                 ["policy_trait_ratio_stddev"]))
@@ -844,10 +879,13 @@ class Citizen():
         # Initialize instance variables that do not come from the input file.
         self.current_patch = patch
         self.politician_list = []
+        self.set_zone_list()
 
 
-    def vote(self, preliminary):
-        for 
+    def set_zone_list(self, world):
+        self.zone_list = []
+        for zone_idx in self.current_patch.zone_index:
+            self.zone_list.append(world.zones[zone_idx])
 
 
     def clear_politicians(self):
@@ -911,18 +949,10 @@ class Citizen():
 
             # Obtain the overlap between each citizen policy preference and aversion
             #   and each politician policy preference and aversion.
-            self.Pcp_Ppp_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
-                    self.Pcp_orien, politician.Ppp_pos, politician.Ppp_stddv,
-                    self.Ppp_orien))
-            self.Pca_Ppa_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
-                    self.Pca_orien, politician.Ppa_pos, politician.Ppa_stddv,
-                    self.Ppa_orien))
-            self.Pcp_Ppa_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
-                    self.Pcp_orien, politician.Ppa_pos, politician.Ppa_stddv,
-                    self.Ppa_orien))
-            self.Pca_Ppp_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
-                    self.Pca_orien, politician.Ppp_pos, politician.Ppp_stddv,
-                    self.Ppp_orien))
+            self.Pcp_Ppp_ol.append(self.stated_policy_pref.integral(politician.ext_policy_pref))
+            self.Pca_Ppa_ol.append(self.stated_policy_aver.integral(politician.ext_policy_aver))
+            self.Pcp_Ppa_ol.append(self.stated_policy_pref.integral(politician.ext_policy_aver))
+            self.Pca_Ppp_ol.append(self.stated_policy_aver.integral(politician.ext_policy_pref))
 
 
     def trait_politician_integrals(self):
@@ -932,63 +962,60 @@ class Citizen():
 
             # Obtain the overlap between each citizen trait preference and aversion
             #   and each politician externally exposed trait.
-            self.Tcp_Tpx_ol.append(compute_overlap(self.Tcp_pos, self.Tcp_stddv,
-                    self.Tcp_orien, politician.Tpx_pos, politician.Tpx_stddv,
-                    self.Tpx_orien))
-            self.Tca_Tpx_ol.append(compute_overlap(self.Tca_pos, self.Tca_stddv,
-                    self.Tca_orien, politician.Tpx_pos, politician.Tpx_stddv,
-                    self.Tpx_orien))
+            self.Tcp_Tpx_ol.append(self.stated_trait_pref.integral(politician.ext_trait))
+            self.Tca_Tpx_ol.append(self.stated_trait_aver.integral(politician.ext_trait))
 
 
     def policy_citizen_integrals(self):
 
-        for zone in self.patch.zone_index:
+        for zone in self.zone_list:
             # Obtain the overlap between each citizen policy preference and aversion
             #   and the zone average values across all citizen of the zone.
-            self.Pcp_Pcp_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
-                    self.Pcp_orien, zone.avg_Pcp[0], zone.avg_Pcp[1], zone.avg_Pcp[2]))
-            self.Pca_Pca_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
-                    self.Pca_orien, zone.avg_Pca[0], zone.avg_Pca[1], zone.avg_Pca[2]))
-            self.Pcp_Pca_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
-                    self.Pcp_orien, zone.avg_Pca[0], zone.avg_Pca[1], zone.avg_Pca[2]))
-            self.Pca_Pcp_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
-                    self.Pca_orien, zone.avg_Pcp[0], zone.avg_Pcp[1], zone.avg_Pcp[2]))
+            self.Pcp_Pcp_ol.append(self.stated_policy_pref.integral(zone.avg_Pcp))
+            self.Pca_Pca_ol.append(self.stated_policy_aver.integral(zone.avg_Pca))
+            self.Pcp_Pca_ol.append(self.stated_policy_pref.integral(zone.avg_Pca))
+            self.Pca_Pcp_ol.append(self.stated_policy_aver.integral(zone.avg_Pcp))
 
 
     def trait_citizen_integrals(self):
 
-        for zone in self.patch.zone_index:
+        for zone in self.zone_list:
             # Obtain the overlap between each citizen trait preference and aversion
             #   and the zone average values across all citizen of the zone.
-            self.Tcp_Tcp_ol.append(compute_overlap(self.Tcp_pos, self.Tcp_stddv,
-                    self.Tcp_orien, zone.avg_Tcp[0], zone.avg_Tcp[1], zone.avg_Tcp[2]))
-            self.Tca_Tca_ol.append(compute_overlap(self.Tca_pos, self.Tca_stddv,
-                    self.Tca_orien, zone.avg_Tca[0], zone.avg_Tca[1], zone.avg_Tca[2]))
-            self.Tcp_Tca_ol.append(compute_overlap(self.Tcp_pos, self.Tcp_stddv,
-                    self.Tcp_orien, zone.avg_Tca[0], zone.avg_Tca[1], zone.avg_Tca[2]))
-            self.Tca_Tcp_ol.append(compute_overlap(self.Tca_pos, self.Tca_stddv,
-                    self.Tca_orien, zone.avg_Tcp[0], zone.avg_Tcp[1], zone.avg_Tcp[2]))
+            self.Tcp_Tcp_ol.append(self.stated_trait_pref.integral(zone.avg_Tcp))
+            self.Tca_Tca_ol.append(self.stated_trait_aver.integral(zone.avg_Tca))
+            self.Tcp_Tca_ol.append(self.stated_trait_pref.integral(zone.avg_Tca))
+            self.Tca_Tcp_ol.append(self.stated_trait_aver.integral(zone.avg_Tcp))
 
 
     def policy_government_integrals(self, world):
             
         # Compute the overlaps between the citizen and the enacted policies of the
         #   government.
-        self.Pcp_Pge_ol.append(compute_overlap(self.Pcp_pos, self.Pcp_stddv,
-                self.Pcp_orien, world.government.policy_pos,
-                world.government.policy_stddv, world.government.policy_orien))
-        self.Pca_Pge_ol.append(compute_overlap(self.Pca_pos, self.Pca_stddv,
-                self.Pca_orien, world.government.policy_pos,
-                world.government.policy_stddv, world.government.policy_orien))
-        self.Pci_Pge_ol.append(compute_overlap(self.Pci_pos, self.Pci_stddv,
-                self.Pci_orien, world.government.policy_pos,
-                world.government.policy_stddv, world.government.policy_orien))
+        self.Pcp_Pge_ol.append(self.stated_policy_pref.integral(world.government.policy))
+        self.Pca_Pge_ol.append(self.stated_policy_aver.integral(world.government.policy))
+        self.Pci_Pge_ol.append(self.stated_policy_ideal.integral(world.government.policy))
 
 
     def respond_to_politician_influence(self):
+        # Assume that the politicians do not influence the citizen.
+        shift = [0 for x in ]
 
         # Consider each politician that this citizen could vote for from each zone.
         for politician in self.politician_list:
+
+
+
+    def rank_candidates(self, world):
+        for zone_index in self.current_patch.zone_index:
+            for world.zones:
+
+
+    def vote(self, world):
+        for zone_index in self.current_patch.zone_index:
+            for world.zones:
+                if (preliminary)
+
 
 
     def initialize_one_overlap(self, dimensions, entities):
@@ -1035,29 +1062,30 @@ class Citizen():
 
 
 class Politician():
-    # Politicians have an innate "personality" position on a one-dimensional spectrum. The
-    #   distance between a citizen's personality position and a politician's personality position
-    #   will influence (1) the ability of the politician to persuade a citizen with respect to
-    #   their policy positions; (2) the probability that a citizen will vote for a politician;
-    #   (3) the probability that a citizen will allow policy position misrepresentations to go
-    #   "unpunished".
+    # Politicians have an innate set of personality "traits" positioned on a one-dimensional
+    #   spectrum. The distance between a citizen's trait position and a politician's trait
+    #   position will influence (1) the ability of the politician to persuade a citizen with
+    #   respect to their policy positions; (2) the probability that a citizen will vote for
+    #   a politician; (3) the probability that a citizen will allow policy position
+    #   misrepresentations to go "unpunished".
 
     # Politicians have an innate position for each policy dimension. The innate position should
     #   not be understood as a "values" statement in any definite sense. For some politicians,
     #   it may be representative of their "values" but for others it may be better thought of as
     #   their "desire". Presently, the innate position is static for each politician.
 
-    # Politicians have an apparent position for each policy dimension. The apparent position is
-    #   what a politician presents to citizens. The apparent position will differ from the innate
-    #   position due to factors: (1) The innate position and the average position of targeted
-    #   citizens differ, and so the politician presents an apparent position that is closer to
-    #   that of the local citizens. (2) The politician is willing to misrepresent their innate
+    # Politicians have an apparent "externally visible" position for each policy dimension. The
+    #   external position is what a politician presents to citizens. The apparent position
+    #   will differ from the innate position due to factors: (1) The innate position and the
+    #   average position of the citizens who's votes the politician wants to obatian tend to
+    #   differ. So, the politician may present an apparent position to the citizens in an effort
+    #   to persuade them. (2) The politician is willing to misrepresent their innate
     #   position by an amount in proportion to their propensity to lie/pander and believe that
     #   they will not turn off citizens by being detected.
     
     # It is assumed that citizens may or may not be able to detect (or may not care about) the
     #   difference between an apparent policy position and the innate position that a politician
-    #   has. When the apparent 
+    #   has.
 
     def __init__(self, settings, zone_type, zone, patch):
 
@@ -1084,23 +1112,40 @@ class Politician():
 
 
     def reset_to_input(self, settings):
-        self.policy_pos = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["policy_pos_stddev"]),size=num_policy_dims)
-        self.policy_spread = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["policy_pos_stddev"]),size=num_policy_dims)
-        if (settings.infile_dict[1]["politicians"]["policy_orientation"] == "uniform"):
-            self.policy_orientation = rng.uniform(high=2.0*np.pi, size=num_policy_dims)
-        else:
-            print("Unknown politician policy orientation\n")
-            exit()
-        self.trait_pos = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["trait_stddev"]),size=num_trait_dims)
-        self.trait_spread = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["trait_pos_stddev"]),size=num_trait_dims)
+        # Use a uniform initial policy orientation
+        self.innate_policy_pref = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_pref_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_pref_stddev_stddev"]),
+                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+        self.innate_policy_aver = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_aver_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_aver_stddev_stddev"]),
+                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+        self.ext_policy_pref = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_pref_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_pref_stddev_stddev"]),
+                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+        self.ext_policy_aver = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_aver_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["policy_aver_stddev_stddev"]),
+                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+
+        # Use a uniform initial trait orientation
+        self.innate_trait = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["trait_innate_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["trait_innate_stddev_stddev"]),
+                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+        self.ext_trait = Gaussian(rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["trait_ext_pos_stddev"]),
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]["trait_ext_stddev_stddev"]),
+                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+
         self.policy_influence = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_influence_stddev"]))
@@ -1183,34 +1228,54 @@ class Government():
 
     # Define class variables.
     num_policy_dims = 0
-    policy_pos = []
-    policy_stddv = []
-    policy_orien = []
 
     def __init__(self, settings):
-        Government.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
-        Government.policy_pos = rng.normal(loc=0.0,
+        self.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
+
+        # Real policy orientation.
+        self.enacted_policy = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["government"]["policy_pos_stddev"]),
-                size=num_policy_dims
-        Government.policy_spread = abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["government"]["policy_pos_stddev"]),
-                size=num_policy_dims
-        Government.policy_orientation = [1] * Government.num_policy_dims # Positive real number
+                size=num_policy_dims), rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["government"]["policy_stddev_stddev"]),
+                size=num_policy_dims), [1] * self.num_policy_dims)
 
 
 # Mathematical form:
 #  g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
+#   FWHM = 2 sqrt(2 ln(2)) * sigma.
+#   alpha = 1/(2 sigma^2)
+#   zeta = alpha_1 + alpha_2 for two Gaussians
+#   xi = 1/(2 zeta)
+#   d = mu_1 - mu_2 for two Gaussians
+# A list of Gaussian functions.
 class Gaussian():
-    def __init__(self, pos, stddv, orien):
-        # Create instance variables.
+    def __init__(self, pos, stddev, orien):
+
+        # Create instance variables that define the Gaussians.
         self.mu = pos
         self.sigma = stddev
         self.theta = orien
 
+        # Prepare the Gaussians for use in the integral subroutine.
+        update_integration_variables()
+
+
+    def update_integration_variables(self):
+        self.alpha = 0.5 / self.sigma**2
+        self.cos_theta = m.cos(self.theta)
+
+
     def integral(self, g):
-        # Get the real parts of the self and g (given) Gaussians.
-
-
+        # Get the real parts of the integral of the product of the self and
+        #   g (given) Gaussians.
+        #   I(G1,G2) = Integral(Re(G1)*Re(G2) dx; -infinity..+infinity)
+        #   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2) * cos(theta_1) * cos(theta_2)
+        one_over_zeta = 1.0 / (self.alpha + g.alpha)
+        xi = 0.5 * one_over_zeta
+        dist = self.mu - g.mu
+        intg = (np.pi * one_over_zeta)**1.5 * exp(-xi * dist**2)
+                * self.cos_theta * g.cos_theta
+        return intg
 
 
 class Hdf5():
