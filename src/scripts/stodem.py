@@ -12,6 +12,9 @@ import h5py as h5
 import math as m
 import random
 
+#import pudb
+#pudb.set_trace()
+
 # Discussion:
 
 # All aspects of the program are open to modification, revision, elimination, etc.
@@ -24,12 +27,13 @@ import random
 #   a set of patches such that (ideally) the smallest zone consists of at least a few
 #   dozen patches.
 
-# The zones may be classified as fixed or flexible. If a zone is fixed, then its boundaries
-#   will remain constant throughout the simulation. If a zone is flexible, then its
-#   boundaries may change during the simulation with the constraint that a zone is not
-#   allowed to overlap with another zone of the same level and it is not allowed to cross
-#   a border of a higher level zone. (I.e., a zone cannot be spread across two higher level
-#   zones at the same time such as a single district being part of two states.)
+# The zones may be classified as fixed or flexible. If a zone is fixed, then its
+#   boundaries will remain constant throughout the simulation. If a zone is flexible,
+#   then its boundaries may change during the simulation with the constraint that a
+#   zone is not allowed to overlap with another zone of the same level and it is not
+#   allowed to cross a border of a higher level zone. (I.e., a zone cannot be spread
+#   across two higher level zones at the same time such as a single district being
+#   part of two states.)
 
 # Each zone is home to some (non-zero) positive number of politicians. The number of
 #   politicians in a zone can change throughout the course of the simulation.
@@ -52,58 +56,64 @@ import random
 # Each dimension should be envisioned as a one-dimensional real number line that extends
 #   from -infinity to +infinity. The dimensions do not interact with each other and are
 #   independent. An orthogonal imaginary axis is connected to each dimension. Absolute
-#   values on the number line carry no intrinsic meaning so concepts such as "extreme" and
-#   "centrist" are all relative. The policies or personality traits that the dimensions
-#   intend to represent are also completely abstract and have no specific meaning.
+#   values on the number line carry no intrinsic meaning so concepts such as "extreme"
+#   and "centrist" are all relative. The policies or personality traits that the
+#   dimensions intend to represent are also completely abstract and have no specific
+#   meaning.
 
 # The citizen state parameters are used to define a set of one-dimensional Gaussians.
 #   Each Gaussian has a mid-point located somewhere on the real axis, and a standard
-#   deviation that describes the "spread" of the Gaussian. All Gaussian functions have
-#   unit area, but they may be "rotated" about the real axis into the imaginary plane such
-#   that the area of the projection of the Gaussian on the real axis is less than one
-#   (perhaps even zero). Generally, the Gaussians will always maintain one sign. I.e., if a
-#   Gaussian is initialized positive, it will always remain positive and will never
-#   rotate through the imaginary plane to become negative (and vice-verse for any
-#   Gaussians that are initialized to be negative).
+#   deviation that describes the spread of the Gaussian. All Gaussian functions have
+#   unit area, but they may be "rotated" about the real axis into the imaginary plane
+#   such that the area of the projection of the Gaussian on the real axis is less than
+#   one (perhaps even zero). Generally, the Gaussians will always maintain one sign.
+#   I.e., if a Gaussian is initialized positive, it will always remain positive and
+#   will never rotate through the imaginary plane to become negative (and vice-verse
+#   for any Gaussians that are initialized to be negative).
 
 # The Gaussian functions have slightly different interpretations depending on their
 #   role, but there are general commonalities. Perhaps the best way to understand them is
 #   by example. Consider some policy axis and a Gaussian on it. The center point of the
-#   Gaussian defines a "position" with regard to some abstract policy concept. The position
-#   is extreme or centrist only by reference to all other Gaussians of the other citizens
-#   and politicians. Beause all Gaussians have unit area the standard deviation will
-#   establish the range over which that area is spread. The spread speaks to the degree of
-#   attachment that the citizen or politician has to a specific policy position. E.g., if
-#   the Gaussian is tall and sharp, the implication is that the agent is strongly attached
-#   to that specific position. Alternatively, if the Gaussian is spread wide, then the
-#   implication is that many "nearby" variations on that policy are "acceptable" to the
-#   agent. The degree of rotation out of the real axis controls the total area of the
-#   Gaussian on the real axis (i.e., the projection on the real axis). The interpretation
-#   of a Gaussian that has been rotated out of the real plane and into the imaginary is
-#   that while an agent may hold a position with respect to some policy concept, the
-#   agent is apathetic about that policy concept or that the policy concept is currently
-#   not a priority. So, a Gaussian that has been rotated fully into the imaginary axis
-#   indicates that the agent does not take this policy topic into account when making
-#   a voting decision or campaigning.
+#   Gaussian defines a "position" with regard to some abstract policy concept. The
+#   position is extreme or centrist only by reference to all other Gaussians of the
+#   other citizens and politicians. Because all Gaussians have unit area, the standard
+#   deviation will establish the range over which that area is spread. The spread speaks
+#   to the degree of attachment that the citizen or politician has to a specific policy
+#   position. E.g., if the Gaussian is tall and sharp, the implication is that the agent
+#   is strongly attached to that specific position. Alternatively, if the Gaussian is
+#   spread wide, then the implication is that many "nearby" variations on that policy
+#   are "acceptable" to the agent. The degree of rotation out of the real axis controls
+#   the total area of the Gaussian on the real axis (i.e., the projection on the real
+#   axis). The interpretation of a Gaussian that has been rotated out of the real plane
+#   and into the imaginary is that while an agent may hold a position with respect to
+#   some policy concept, the agent is apathetic about that policy concept or that the
+#   policy concept is currently not a priority. So, a Gaussian that has been rotated
+#   fully into the imaginary axis indicates that the agent does not take this policy
+#   topic into account when making a voting decision or campaigning.
 
 # For each policy dimension, each citizen maintains three Gaussians: an ideal policy
-#   position, a stated policy preference, and a policy aversion. Presently, the stated
+#   position, a stated policy preference, and a stated policy aversion. Presently, the
 #   policy preference and policy aversion are understood to be public and available for
 #   averaging across all citizens. So, we take these Gaussians to represent the citizens'
 #   true opinion and not a self-curated "presentation" of themselves which would require
 #   another set of "internal opinion" Gaussians that represent their true opinions. On
 #   the other hand, the ideal policy position is only indirectly known to the citizen.
 #   Therefore, a citizen can have a stated preference that is inconsistent with the
-#   ideal position for the citizen.
+#   ideal position for the citizen. (Indirect in the sense that a "well-being" is
+#   computed based on a comparison of the ideal policy positions and the government's
+#   enacted policies. The "well-being" affects the citizen's engagement, tendency to
+#   believe politicians, etc.)
 
 # In any case...
 
-# The stated policy preference is consciously held by the citizen and is used when comparing
-#   their policy preferences with those of the relevant politicians in preparation for a
-#   vote. Similarly, the stated policy positions are used when comparing the citizen's
-#   policy preferences with the enacted policies of the government during the governing phase
-#   to quantify the citizen's satisfaction with the performance of the government. Further,
-#   the stated policy preferences are used when citizens interact with other citizens.
+# The stated policy preference is consciously held by the citizen and is used when
+#   comparing their policy preferences with those of the relevant politicians in
+#   preparation for a vote. Similarly, the stated policy positions are used when
+#   comparing the citizen's policy preferences with the enacted policies of the
+#   government during the governing phase to quantify the citizen's satisfaction with
+#   the performance of the government. Further, the stated policy preferences are used
+#   when citizens interact with other citizens. Note that all policy preference
+#   Gaussians are positively valued.
 
 # The policy aversions work in a similar way to the preferences except that they are
 #   considered to be negative valued. The aversions are compared to the apparent policy
@@ -112,17 +122,18 @@ import random
 #   the enacted policies of the government during the governing phase. Additionally, the
 #   policy aversions are used when citizens interact with other citizens.
 
-# The ideal policy positions are, on the other hand, a bit different. They are compared to
-#   the government policy positions during the governing phase to compute the citizen's actual
-#   well-being. The measure of well-being is used modulate the political temperature of the
-#   citizen. Within this dynamic, a variety of phenomena may occur. (See below.)
+# The ideal policy positions are, on the other hand, a bit different. They are compared
+#   to the government policy positions during the governing phase to compute the
+#   citizen's actual well-being. The measure of well-being is used modulate the
+#   political temperature of the citizen. Within this dynamic, a variety of phenomena
+#   may occur. (See below.) Note, that all ideal policy positions are positive.
 
 # In addition to the policy dimensions, there are also personality trait dimensions. Each
 #   citizen maintains two Gaussians for each personality trait dimension. One is a stated
 #   personality trait affinity and the other is a stated personality trait aversion.
-#   Each politician has one personality trait for each dimension. The personality attitudes
-#   only interact with the personalities of politicians and other citizens. The government
-#   has no personality position.
+#   Each politician has one personality trait for each dimension. The personality
+#   attitudes only interact with the personalities of politicians and other citizens.
+#   The government has no personality position.
 
 # The notation for Gaussian functions is as follows:
 #   Pcp;n = Policy: citizen stated preference Gaussian for dimension n.
@@ -136,14 +147,16 @@ import random
 #   Tpx;m = Trait: politician personality Gaussian for dimension m.
 
 # The functional form of our complex Gaussian is:
-#   g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
+#   g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2))
+#                         * exp(i theta)
 
 # where:
 
 #   x = the independent variable (arbitray position on the real number line).
 #   sigma = the standard deviation (sigma^2 = the variance).
 #   mu = the point on the real number line of maximum amplitude.
-#   theta = the orientation of the Gaussian about the real number line into the imaginary axis.
+#   theta = the orientation of the Gaussian about the real number line into the
+#           imaginary axis.
 
 # and other convenient variables are:
 
@@ -156,12 +169,13 @@ import random
 # The key relationship between any two Gaussians G1, G2 is their overlap integral:
 #   I(G1,G2) = Integral(Re(G1)*Re(G2) dx; -infinity..+infinity)
 #   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2) * cos(theta_1) * cos(theta_2)
-#   The numerical value of this integral is between -1 and +1. The maximum value occurs when
-#   both Gaussians have exactly equal parameters. The minimum value occurs when both
+#   The numerical value of this integral is between -1 and +1. The maximum value occurs
+#   when both Gaussians have exactly equal parameters. The minimum value occurs when both
 #   Gaussians have exactly equal parameters except for that theta_1 = 0 or pi and
 #   theta_2 = pi or 0 respectively. In many cases, theta is restricted to the range
-#   0 to pi/2 or pi to pi/2. In those cases the integrals are between similarly constrained
-#   Gaussian functions such that the integral maximum to minimum is +1 to 0 or 0 to -1.
+#   0 to pi/2 or pi to pi/2. In those cases the integrals are between similarly
+#   constrained Gaussian functions such that the integral maximum to minimum is +1 to 0
+#   or 0 to -1.
 
 # Certain integral groups can be identified:
 # The comprehensive citizen-politician integration set is I(Pcp;n,Ppp;n), I(Pca;n,Ppa;n),
@@ -198,15 +212,22 @@ import random
 
 # Voting phase:
 # A citizen decides who to vote for by computing the comprehensive citizen-politician
-#   integration set for each eligible politician. The accumulated and weighted (policy vs.
-#   trait) sum that has the highest positive value will be the politician that the person
-#   votes for. The weighting factor will depend on the "satisfaction" that the citizen has
-#   for the current "state of things".
+#   integration set for each eligible politician. The accumulated and weighted (policy
+#   vs. trait) sum that has the highest positive value will be the politician that the
+#   person votes for. The weighting factor will depend on the "satisfaction" that the
+#   citizen has for the current "state of things".
 
 # Campaigning phase:
-# A campaign is an interaction between the politicians and the citizens. In principle,
-#   however, all parties interact with each other.
-# An interaction between a politician and a citizen occurs when they are on the same patch.
+# A campaign is an interaction between the politicians and the citizens. Politicians
+#   attempt to directly influence citizens, citizens' collective attitudes will
+#   influence each other, and politicians may adjust their policies and traits based
+#   policy status of the citizens.
+
+# A direct interaction between a politician and a citizen occurs when they share a
+#   patch. Interactions cause the citizen Gaussians to shift orientation, position, and
+#   spread. The orientation is a measure of the degree to which a citizen is engaged
+#   with an issue. Engagement naturally decreases without any influence. Engagement
+#   increases due to 
 #
 #   Politician-driven citizen engagement (real vs. imaginary policy and trait positions):
 #   The comprehensive citizen-politician integration set for that politician-citizen pair
@@ -217,19 +238,20 @@ import random
 #   real. Weak overlap leads to a weak turn. 
 #
 #   Politician-driven citizen policy shifts and spreads:
-#   The sum of trait integrals can influence the positions of the Gaussians for the citizen
-#   policy prefrences and aversions. If the sum of trait integrals is positive then the
-#   citizen's policy preference Gaussians will move toward the respective policy positions
-#   of the politician. Additionally, the Gaussian standard deviation will change to align
-#   more with that of the politician. Similarly, for a positive trait integral sum, the
-#   citizen's policy aversion Gaussians will change (position and standard deviation) to
-#   align more with the politician. If the sum of trait integrals is negative, then the
-#   citizen's policy preference Gaussian standard deviations will narrow and the policy
-#   aversion Gaussian standard deviations will broaden, however, neither will move. The
-#   idead is: if the citizen likes the politician based on trait alignment, then the
-#   politician can sway the citizen toward their viewpoint. Alternatively, if the citizen
-#   dislikes the politician, then the citizen will not change their own viewpoint preference
-#   position but will instead sharpen their viewpoint and broaden their policy aversions.
+#   The sum of trait integrals can influence the positions of the Gaussians for the
+#   citizen policy prefrences and aversions. If the sum of trait integrals is positive
+#   then the citizen's policy preference Gaussians will move toward the respective
+#   policy positions of the politician. Additionally, the Gaussian standard deviation
+#   will change to align more with that of the politician. Similarly, for a positive
+#   trait integral sum, the citizen's policy aversion Gaussians will change (position
+#   and standard deviation) to align more with the politician. If the sum of trait
+#   integrals is negative, then the citizen's policy preference Gaussian standard
+#   deviations will narrow and the policy aversion Gaussian standard deviations will
+#   broaden, however, neither will move. The idea is: if the citizen likes the
+#   politician based on trait alignment, then the politician can sway the citizen toward
+#   their viewpoint. Alternatively, if the citizen dislikes the politician, then the
+#   citizen will not change their own viewpoint preference position but will instead
+#   sharpen their viewpoint and broaden their policy aversions.
 #
 #   Politician-driven citizen trait shifts and spreads:
 #   There is no direct driver between a politician and the citizen preferences/aversions
@@ -248,11 +270,11 @@ import random
 #   citizen changes their position and standard deviation for each Gaussian.
 #   The sum of policy integrals (between the citizen and the average Gaussian forms from
 #   each zone) may be either positive or negative. Regardless, each citizen will be
-#   attracted toward the average form to a degree. I.e., everyone acclimates to and migrates
-#   toward the average community behavior. Consider a few different scenarios: (1) everyone has
-#   sharp Gaussians at the same position. (2) everyone has sharp Gaussians at different
-#   positions. (3) Broad Gaussians in one position. (4) Broad Gaussians in many different
-#   positions.
+#   attracted toward the average form to a degree. I.e., everyone acclimates to and
+#   migrates toward the average community behavior. Consider a few different scenarios:
+#   (1) everyone has sharp Gaussians at the same position. (2) everyone has sharp
+#   Gaussians at different positions. (3) Broad Gaussians in one position. (4) Broad
+#   Gaussians in many different positions.
 
 #   
 #   negative->away) 
@@ -431,6 +453,7 @@ class World():
 
     # Declare class variables.
     num_policy_dims = 0
+    num_trait_dims = 0
     x_num_patches = 1
     y_num_patches = 1
     patch_size = 0
@@ -445,18 +468,20 @@ class World():
 
     def __init__(self, settings):
 
-        # Get the number of policy dimensions.
+        # Get the number of policy and trait dimensions.
         World.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
+        World.num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
 
-        # Get the patch size. (This is mostly just useless at the moment because the politicians
-        #   and citizens will move *on the patch lattice* itself as opposed to occupying real
-        #   valued space "within" a patch.)
+        # Get the patch size. (This is mostly just useless at the moment because the
+        #   politicians and citizens will move *on the patch lattice* itself as opposed
+        #   to occupying real valued space "within" a patch.)
         World.patch_size = int(settings.infile_dict[1]["world"]["patch_size"])
 
-        # Create zone types. (This is a bit rigid now, but maybe it could be more flexible in
-        #   the future. Zones are political zones that a politician may be restricted to working
-        #   within. I.e., a politician for a zone only collects votes from citizens within their
-        #   designated zone.) Zones must be contiguous and may or may not be static.
+        # Create zone types. (This is a bit rigid now, but maybe it could be more
+        #   flexible in the future. Zones are political zones that a politician may be
+        #   restricted to working within. I.e., a politician for a zone only collects
+        #   votes from citizens within their designated zone.) Zones must be contiguous
+        #   and may or may not be static.
 
         # Get the total number of zone types.
         World.num_zone_types = int(settings.infile_dict[1]["world"]["num_zone_types"])
@@ -533,9 +558,9 @@ class World():
         # Create the zones themselves. (Note above that we just created the *zone types*, not
         #   the zones themselves.)
 
-        # First, make an empty list for each zone type. The zones of each zone type will be
-        #   stored as a list of zones of that type. The World.zones is an empty list. After
-        #   this loop, the list will contain a set of empty lists.
+        # First, make an empty list of zones for each zone type. The zones of each zone
+        #   type will be stored as a list of zones of that type. The World.zones is an
+        #   empty list. After this loop, the list will contain a set of empty lists.
         #   Before: []. After: [[], [], []] with one empty list for each zone type.
         for zone_type in range(World.num_zone_types):
             World.zones.append([])
@@ -560,7 +585,8 @@ class World():
                     #   grid of patches. There are 25 zones in total. If we are going row-by-row
                     #   through the patches, then we will encounter zones 0-4 on the bottom row
                     #   of patches and then 0-4 again in the second from the bottom row, etc.
-                    #   Only when we get to row #5 (the sixth row) will we encounter zones 5-9.
+                    #   Only when we get to patch row #5 (the sixth patch row) will we
+                    #   encounter zones 5-9 as we traverse over the patches.
                     if (World.patches[i][j].zone_index[zone_type] > curr_zone_index[zone_type]):
 
                         # If so, update the current zone index.
@@ -585,7 +611,7 @@ class World():
                 rng.uniform(size=(World.x_num_patches, World.y_num_patches))))
 
 
-    def repopulate_politicians(self):
+    def repopulate_politicians(self, settings):
 
         # Make things easy to start.
         # - Every politician who was elected and governed, will run in the next cycle.
@@ -593,7 +619,7 @@ class World():
         # - All politicians have zero votes.
         for politician in World.politicians:
             if (politician.elected == False):
-                politician.reset_to_input()
+                politician.reset_to_input(settings)
             else:
                 politician.elected = False
             politician.reset_votes()
@@ -693,12 +719,58 @@ class Zone():
         # Each zone maintains a list of the politicians who vie for election in it.
         self.politician_list = []
 
-        # Each zone maintains a list of the citizen average values for policy and
+        # Each zone maintains a list of the citizen average values for each policy and
         #   trait preference and aversion.
-        self.avg_Pcp = [] # Three elements for each policy: pos, stddv, and orien
-        self.avg_Pca = [] # Three elements for each policy: pos, stddv, and orien
-        self.avg_Tcp = [] # Three elements for each trait: pos, stddv, and orien
-        self.avg_Tca = [] # Three elements for each trait: pos, stddv, and orien
+        self.avg_Pcp = []
+        self.avg_Pca = []
+        self.avg_Tcp = []
+        self.avg_Tca = []
+
+        # The zone notes the total number of citizens in it when computing
+        #   averages.
+        self.curr_num_citizens = 0
+
+
+    def compute_zone_averages(self, world):
+        # Initialize empty Gaussians for accumulating.
+        self.avg_Pcp = Gaussian(np.zeros(world.num_policy_dims),
+                                np.zeros(world.num_policy_dims),
+                                np.zeros(world.num_policy_dims)+0j, 0)
+        self.avg_Pca = Gaussian(np.zeros(world.num_policy_dims),
+                                np.zeros(world.num_policy_dims),
+                                np.zeros(world.num_policy_dims)+0j, 0)
+        self.avg_Tcp = Gaussian(np.zeros(world.num_trait_dims),
+                                np.zeros(world.num_trait_dims),
+                                np.zeros(world.num_trait_dims)+0j, 0)
+        self.avg_Tca = Gaussian(np.zeros(world.num_trait_dims),
+                                np.zeros(world.num_trait_dims),
+                                np.zeros(world.num_trait_dims)+0j, 0)
+
+        # Initialize the count of the number of citizens in this zone.
+        self.curr_num_citizens = 0
+
+        # Visit each patch in this zone and accumulate the citizen policy+trait
+        #   prefs+aversions from each citizen in this zone.
+        for patch in self.patches:
+            self.curr_num_citizens += len(patch.citizen_list)
+            for citizen in patch.citizen_list:
+                self.avg_Pcp.accumulate(world.citizens[citizen].stated_policy_pref)
+                self.avg_Pca.accumulate(world.citizens[citizen].stated_policy_aver)
+                self.avg_Tcp.accumulate(world.citizens[citizen].stated_trait_pref)
+                self.avg_Tca.accumulate(world.citizens[citizen].stated_trait_aver)
+
+        # Divide the values by the number of citizens that contributed to each average.
+        self.avg_Pcp.average(self.curr_num_citizens)
+        self.avg_Pca.average(self.curr_num_citizens)
+        self.avg_Tcp.average(self.curr_num_citizens)
+        self.avg_Tca.average(self.curr_num_citizens)
+
+        # Update the integration variables using the newly computed averages.
+        self.avg_Pcp.update_integration_variables()
+        self.avg_Pca.update_integration_variables()
+        self.avg_Tcp.update_integration_variables()
+        self.avg_Tca.update_integration_variables()
+
 
 
     def add_politician(self, politician):
@@ -738,6 +810,11 @@ class Patch():
         #   x-direction and increasing by the number of zones in a row for each row in the
         #   y-direction.
         for zone_type in range(num_zone_types):
+            #print("i,j,zone_type =",i,j,zone_type)
+            zone_idx = (i // zone_types[zone_type]["x_num_patches"]) + \
+                       (j // zone_types[zone_type]["y_num_patches"]) * \
+                       (x_num_patches // zone_types[zone_type]["x_num_patches"])
+            #print("zone_idx =",zone_idx)
             self.zone_index.append( \
                     (i // zone_types[zone_type]["x_num_patches"]) + \
                     (j // zone_types[zone_type]["y_num_patches"]) * \
@@ -748,16 +825,17 @@ class Patch():
 
         # Add citizens to this patch.
         self.citizen_list = np.array(range(start_index,
-                start_index + num_citizens + 1))
+                start_index + num_citizens))
 
 
 class Citizen():
-    # Citizens have an innate "personality trait" preferences and aversion that can change
+    # Citizens have an innate "personality trait" preference and aversion that can change
     #   to align with a politician.
 
     # Citizens have a stated policy position for each policy. This is the policy position
     #   that the citizen claims to align with and it will affect their preference for a
-    #   particular politician. Similarly, each citizen has a policy aversion for each.
+    #   particular politician. Similarly, each citizen has an aversion associated with
+    #   each policy.
 
     # Citizens have a most-beneficial policy position that the citizen does not directly know.
     #   I.e., the well-being of the citizen will depend on the alignment between governing
@@ -767,7 +845,7 @@ class Citizen():
     #   zero, the individual would pay nothing, but also likely have no services. If it was
     #   set to 100% they would have no money, but would have many servies. The "correct"
     #   number is not easy for any individual to know and that individual's stated preference
-    #   may easily be different than whatever number actually benefits them the most.
+    #   may easily be different from whatever number actually benefits them the most.
 
     # Citizens have a probability of participation. It is affected (in no order) by:
     #   (1) The personality alignment between a citizen and a politician.
@@ -775,119 +853,97 @@ class Citizen():
     #   (3) Whether or not the citizen voted previously.
     #   (4) The number of citizens in the same zone that vote in agreement with the citizen.
     #   (5) The well-being of the citizen.
+    #   (6) Whether the person that they voted for last time won or not.
 
-    # Citizens have a well-being factor that weights the degree to which they will use personality
-    #   or policy alignment when deciding how to cast their vote.
+    # Citizens have a well-being factor that weights the degree to which they will use
+    #   personality or policy alignment when deciding how to cast their vote.
      
 
     def __init__(self, settings, patch):
 
         # Get temporary local names for settings variables.
-        num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
-        num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
+        self.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
+        self.num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
 
         # Define the initial instance variables of this citizen.
 
         # Define instance variables given in the input file.
-        self.participation_prob = \
-                float(settings.infile_dict[1]["citizens"]["participation_prob"])
+        self.participation_prob = rng.normal(loc=float(
+                settings.infile_dict[1]["citizens"]["participation_prob_pos"]), scale=
+                float(settings.infile_dict[1]["citizens"]["participation_prob_stddev"]))
 
+        # For each policy, create a preference. The preference is represented using a
+        #   Gaussian function that is centered near 0 (following a Gaussian
+        #   distribution with the given standard deviation) and that has a spread as
+        #   a random number using a Gaussian distribution centered at 0 with a
         self.stated_policy_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_pref_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_pref_stddev_stddev"]),
-                size=num_policy_dims), (rng.integers(low=0, high=1, endpoint=True,
-                size=num_policy_dims)*2 - 1) * 1j)
+                size=self.num_policy_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=self.num_policy_dims)*2 - 1) * 1j, 1)
 
         self.stated_policy_aver = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_aver_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["policy_aver_stddev_stddev"]),
-                size=num_policy_dims), (rng.integers(low=0, high=1, endpoint=True,
-                size=num_policy_dims)*2 - 1) * 1j)
+                size=self.num_policy_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=self.num_policy_dims)*2 - 1) * 1j, 1)
 
-        self.ideal_policy_pref = Gaussian([x + rng.normal(
-                loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
+        self.ideal_policy_pref = Gaussian([x + rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["citizens"]
                 ["ideal_policy_pref_pos_stddev"])) for x in self.stated_policy_pref.mu],
-                rng.normal(loc=0.0, [int(settings.infile_dict[1]["citizens"]
-                ["ideal_policy_pref_stddev"]) for x in num_policy_dims]), 
-                [1 + 0j for x in num_policy_dims])
+                rng.normal(loc=0.0, scale=[float(settings.infile_dict[1]["citizens"]
+                ["ideal_policy_pref_stddev_stddev"]) for x in range(self.num_policy_dims)]), 
+                [1 + 0j for x in range(self.num_policy_dims)], 1)
 
         self.stated_trait_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["trait_pref_pos_stddev"]),
-                size=num_trait_dims), rng.normal(loc=0.0,
+                size=self.num_trait_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["trait_pref_stddev_stddev"]),
-                size=num_trait_dims), (rng.integers(low=0, high=1, endpoint=True,
-                size=num_trait_dims)*2 - 1) * 1j)
+                size=self.num_trait_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=self.num_trait_dims)*2 - 1) * 1j, 1)
 
         self.stated_trait_aver = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["trait_aver_pos_stddev"]),
-                size=num_trait_dims), rng.normal(loc=0.0,
+                size=self.num_trait_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]["trait_aver_stddev_stddev"]),
-                size=num_trait_dims), (rng.integers(low=0, high=1, endpoint=True,
-                size=num_trait_dims)*2 - 1) * 1j)
-
-        #self.stated_policy_pref_pos = rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]["policy_pref_pos_stddev"]),
-        #        size=num_policy_dims)
-        #self.stated_policy_aver_pos = rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]["policy_aver_pos_stddev"]),
-        #        size=num_policy_dims)
-        #self.stated_policy_pref_stddev = rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]["policy_pref_stddev_stddev"]),
-        #        size=num_policy_dims)
-        #self.stated_policy_aver_stddev = rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]["policy_aver_stddev_stddev"]),
-        #        size=num_policy_dims)
-        #if (settings.infile_dict[1]["citizens"]["policy_orientation"] == "imaginary"):
-        #    # Create random integers between 0 and 1 inclusive. Then multiply by 2
-        #    #   and subtract 1 (in that order) to get random values of -1 or 1. Finally,
-        #    #   multiply by the imaginary number (1j) to initialize citizen policy
-        #    #   positions. (Citizens initially have no policy engagement.)
-        #    self.stated_policy_pref_orien= (rng.integers(low=0, high=1, endpoint=True,
-        #            size=num_policy_dims)*2 - 1) * 1j
-        #    self.stated_policy_aver_orien= (rng.integers(low=0, high=1, endpoint=True,
-        #            size=num_policy_dims)*2 - 1) * 1j
-        #else:
-        #    print("Unknown citizen policy orientation\n")
-        #    exit()
-        #self.ideal_policy_pref_pos = self.stated_policy_pref_pos.copy()
-        #self.ideal_policy_pref_pos = [x + rng.normal(
-        #        loc=0.0, scale=float(settings.infile_dict[1]["citizens"]
-        #        ["ideal_policy_pref_pos_stddev"])) for x in self.ideal_policy_pref_pos]
-        #self.ideal_policy_pref_stddev = [int(settings.infile_dict[1]["citizens"]
-        #        ["ideal_policy_pref_stddev"]) for x in num_policy_dims]
-        #self.ideal_policy_pref_orien = [1 + 0j for x in num_policy_dims]
+                size=self.num_trait_dims), (rng.integers(low=0, high=1, endpoint=True,
+                size=self.num_trait_dims)*2 - 1) * 1j, 1)
 
         self.policy_consistency = self.policy_alignment()
-        #self.trait_pref_pos = rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]
-        #        ["trait_pref_pos_stddev"]),size=num_trait_dims)
-        #self.trait_aver_pos = rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]
-        #        ["trait_aver_pos_stddev"]),size=num_trait_dims)
-        #self.trait_pref_stddev = abs(rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]
-        #        ["trait_pref_stddev_stddev"]),size=num_trait_dims))
-        #self.trait_aver_stddev = abs(rng.normal(loc=0.0,
-        #        scale=float(settings.infile_dict[1]["citizens"]
-        #        ["trait_aver_stddev_stddev"]),size=num_trait_dims))
+
         self.policy_trait_ratio = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["citizens"]
                 ["policy_trait_ratio_stddev"]))
 
         # Initialize instance variables that do not come from the input file.
         self.current_patch = patch
-        self.politician_list = []
-        self.set_zone_list()
+        self.politician_list = []  # Politicians that this citizen can vote for.
+        self.set_zone_list()  # Zones that this citizen is in.
 
 
-    def set_zone_list(self, world):
+    def set_zone_list(self):
+        # Initialize that this citizen belongs to no zones.
         self.zone_list = []
-        for zone_idx in self.current_patch.zone_index:
-            self.zone_list.append(world.zones[zone_idx])
+
+        # Consider each of the zone types (accessed by looking at the length of
+        #   the zone_index array in the current patch of this citizen). The
+        #   zone_index array will have one entry for each type of zone.
+        for zone_type in range(len(self.current_patch.zone_index)):
+            # Of all zones of the current zone_type in the World, append the
+            #   zone_index of the current zone_type associated with the
+            #   current_patch that this citizen is on.
+            self.zone_list.append(World.zones[zone_type]
+                                  [self.current_patch.zone_index[zone_type]])
 
 
+    # Add a politician.
+    def add_politician(self, politician):
+        self.politician_list.append(politician)
+
+
+    # Clear the politicians that this citizen could vote for.
     def clear_politicians(self):
         self.politician_list.clear()
 
@@ -992,71 +1048,98 @@ class Citizen():
             
         # Compute the overlaps between the citizen and the enacted policies of the
         #   government.
-        self.Pcp_Pge_ol.append(self.stated_policy_pref.integral(world.government.policy))
-        self.Pca_Pge_ol.append(self.stated_policy_aver.integral(world.government.policy))
-        self.Pci_Pge_ol.append(self.stated_policy_ideal.integral(world.government.policy))
+        self.Pcp_Pge_ol.append(
+                self.stated_policy_pref.integral(world.government.enacted_policy))
+        self.Pca_Pge_ol.append(
+                self.stated_policy_aver.integral(world.government.enacted_policy))
+        self.Pci_Pge_ol.append(
+                self.ideal_policy_pref.integral(world.government.enacted_policy))
 
 
-    def respond_to_politician_influence(self):
-        # Assume that the politicians do not influence the citizen.
-        shift = [0 for x in ]
+    def prepare_for_influence(self, num_policy_dims, num_trait_dims):
+        # Initialize variables to accumulate orientation, position, and
+        #   standard deviation shifts that are caused by influences from
+        #   politicians, other citizens and the citizen's own sense of
+        #   well-being.
+        self.policy_orien_shift = [0 for x in range(num_policy_dims)]
+        self.policy_pos_shift = [0 for x in range(num_policy_dims)]
+        self.policy_stddev_shift = [0 for x in range(num_policy_dims)]
+        self.trait_orien_shift = [0 for x in range(num_trait_dims)]
+        self.trait_pos_shift = [0 for x in range(num_trait_dims)]
+        self.trait_stddev_shift = [0 for x in range(num_trait_dims)]
+
+
+    def build_response_to_politician_influence(self):
+
+        # This citizen must incorporate all influence from all politicians.
+        #   The influence takes the form of shifts to the orientation,
+        #   position, and standard deviation of each policy and trait Gaussian.
+
+        # The orientation of each policy will shift
+
+        # The sum of trait integrals can influence
 
         # Consider each politician that this citizen could vote for from each zone.
         for politician in self.politician_list:
+            self.policy_orien_shift += self.Pcp_Ppp_ol
+            self.policy_orien_shift += self.Pca_Ppa_ol
+            self.policy_orien_shift += self.Pcp_Ppa_ol
+            self.policy_orien_shift += self.Pca_Ppp_ol
+            self.trait_orien_shift += self.Tcp_Tpx_ol
+            self.trait_orien_shift += self.Tca_Tpx_ol
 
 
+    def build_response_to_citizen_collective(self):
+        self.policy_orien_shift += self.Pcp_Pcp_ol
+        self.policy_orien_shift += self.Pca_Pca_ol
+        self.policy_orien_shift += self.Pcp_Pca_ol
+        self.policy_orien_shift += self.Pca_Pcp_ol
+        self.trait_orien_shift += self.Tcp_Tcp_ol
+        self.trait_orien_shift += self.Tca_Tca_ol
+        self.trait_orien_shift += self.Tcp_Tca_ol
+        self.trait_orien_shift += self.Tca_Tcp_ol
 
-    def rank_candidates(self, world):
+
+    def build_response_to_well_being(self):
+        pass
+
+
+    def score_candidates(self, world):
+
+        pol_index = 0
+        self.politician_score = []
+        for politician in self.politician_list:
+            self.politician_score.append(sum(self.Pcp_Ppp_ol[pol_index]))
+            self.politician_score[pol_index] += sum(self.Pca_Ppa_ol[pol_index])
+            self.politician_score[pol_index] += sum(self.Pcp_Ppa_ol[pol_index])
+            self.politician_score[pol_index] += sum(self.Pca_Ppp_ol[pol_index])
+            self.politician_score[pol_index] += sum(self.Tcp_Tpx_ol[pol_index])
+            self.politician_score[pol_index] += sum(self.Tca_Tpx_ol[pol_index])
+            pol_index += 1
+
+
+    def vote_for_candidates(self, world):
         for zone_index in self.current_patch.zone_index:
-            for world.zones:
+            sys.exit()
 
 
-    def vote(self, world):
-        for zone_index in self.current_patch.zone_index:
-            for world.zones:
-                if (preliminary)
-
-
-
-    def initialize_one_overlap(self, dimensions, entities):
-        return [[0 for z in range(dimensions)] for y in range(len(entities))]
-
-
-    def initialize_all_overlaps(self):
-        # Define instance variables to hold the overlaps. Each is a list of lists.
-        #   There will be one list for each dimension. Then, in each of those lists,
-        #   there will be one list for each zone. In each zone list there will be
-        #   one element for each politician.
-        self.stated_policy_pref_overlap = [[] for x in range(self.num_policy_dims)]
-        self.stated_policy_aver_overlap = [[] for x in range(self.num_policy_dims)]
-        self.ideal_policy_pref_overlap = [[] for x in range(self.num_policy_dims)]
-        self.ideal_policy_aver_overlap = [[] for x in range(self.num_policy_dims)]
-        self.trait_pref_overlap = [[] for x in range(self.num_trait_dims)]
-        self.trait_aver_overlap = [[] for x in range(self.num_trait_dims)]
-
-
-    # Compute the relationship between this citizen's stated policy positions and the actual
-    #   policies as implemented by the government.
+    # Compute the relationship between this citizen's stated policy positions and the
+    #   actual policies as implemented by the government.
     def policy_attitude(self, government):
         attitude = 0
-        for (stated, govern) in zip(self.state_policy_pos, government.policy_pos):
-            attitude += 
+        for (stated, govern) in zip(self.stated_policy_pref.pos, government.policy_pos):
+            #attitude += 
+            pass
 
 
     # Compute the relationship between this citizen's policy positions and the ideal
     #   (unknown to the citizen) policies that will benefit this citizen the most.
     def policy_alignment(self):
         alignment = 0 # Represents perfect alignment.
-        for (stated, ideal) in zip(self.stated_policy_pos, self.ideal_policy_pos):
+        for (stated, ideal) in zip(self.stated_policy_pref.mu, self.ideal_policy_pref.mu):
             alignment += abs(stated - ideal)
 
         return alignment
-
-
-    # Compute the full suite of policy overlaps with each politician.
-    def compute_politician_policy_overlap(self, world):
-        for pol in (world.politicians):
-            for policy in (self.num_policies):
 
 
 
@@ -1089,12 +1172,12 @@ class Politician():
 
     def __init__(self, settings, zone_type, zone, patch):
 
-        # Get local names for settings variables.
-        num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
-        num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
+        # Convert some settings variables to instance variables.
+        self.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
+        self.num_trait_dims = int(settings.infile_dict[1]["world"]["num_trait_dims"])
 
         # Define the initial instance variables of this politician obtained from the input file.
-        self.reset_to_input()
+        self.reset_to_input(settings)
 
         # Select strategies for politician activities.
         self.move_strategy = self.select_strategy(settings, "move")
@@ -1115,36 +1198,42 @@ class Politician():
         # Use a uniform initial policy orientation
         self.innate_policy_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_pref_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_pref_stddev_stddev"]),
-                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
+                size=self.num_policy_dims), 1)
         self.innate_policy_aver = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_aver_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_aver_stddev_stddev"]),
-                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
+                size=self.num_policy_dims), 1)
         self.ext_policy_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_pref_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_pref_stddev_stddev"]),
-                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
+                size=self.num_policy_dims), 1)
         self.ext_policy_aver = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_aver_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["policy_aver_stddev_stddev"]),
-                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
+                size=self.num_policy_dims), 1)
 
         # Use a uniform initial trait orientation
         self.innate_trait = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["trait_innate_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_trait_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["trait_innate_stddev_stddev"]),
-                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+                size=self.num_trait_dims), rng.uniform(high=2.0*np.pi,
+                size=self.num_trait_dims), 1)
         self.ext_trait = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["trait_ext_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_trait_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]["trait_ext_stddev_stddev"]),
-                size=num_policy_dims), rng.uniform(high=2.0*np.pi, size=num_policy_dims))
+                size=self.num_trait_dims), rng.uniform(high=2.0*np.pi,
+                size=self.num_trait_dims), 1)
 
         self.policy_influence = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
@@ -1166,11 +1255,16 @@ class Politician():
     def reset_votes(self):
         self.votes = 0
 
-
+    # Add self to the list of politicians that each citizen in the zone could
+    #   vote for.
     def present_to_citizens(self, world):
+        # Consider every patch in the zone that this politician competes in.
         for patch in self.zone.patches:
-            for citizen in world.citizens[patch.citizen_list]:
-                citizen.politician_list.append(self)
+            #print("patch.citizen_list", patch.citizen_list)
+
+            # Consider every citizen in this patch.
+            for citizen in patch.citizen_list:
+                World.citizens[citizen].add_politician(self)
 
 
     def select_strategy(self, settings, strat_type):
@@ -1204,8 +1298,7 @@ class Politician():
         # Set apparent policy positions and personality positions according to the strategy
         #   that this politician is following.
         if (self.adapt_strategy == 0):
-            self.apparent_policy_pos = self.policy_pos.copy()  # List copy.
-            self.apparent_trait_pos = self.trait_pos.copy()  # List copy.
+            pass
 
 
     def persuade(self, world):
@@ -1214,6 +1307,7 @@ class Politician():
         # 
 
         for citizen in self.patch.citizen_list:
+            pass
             # Compare each policy position of the citizen with the current apparent policy
             #   position of the politician.
             # 
@@ -1235,9 +1329,9 @@ class Government():
         # Real policy orientation.
         self.enacted_policy = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["government"]["policy_pos_stddev"]),
-                size=num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims), rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["government"]["policy_stddev_stddev"]),
-                size=num_policy_dims), [1] * self.num_policy_dims)
+                size=self.num_policy_dims), [1] * self.num_policy_dims, 1)
 
 
 # Mathematical form:
@@ -1249,20 +1343,21 @@ class Government():
 #   d = mu_1 - mu_2 for two Gaussians
 # A list of Gaussian functions.
 class Gaussian():
-    def __init__(self, pos, stddev, orien):
+    def __init__(self, pos, stddev, orien, initialize):
 
         # Create instance variables that define the Gaussians.
-        self.mu = pos
-        self.sigma = stddev
-        self.theta = orien
+        self.mu = np.array(pos)
+        self.sigma = np.array(stddev)
+        self.theta = np.array(orien)
 
         # Prepare the Gaussians for use in the integral subroutine.
-        update_integration_variables()
+        if (initialize == 1):
+            self.update_integration_variables()
 
 
     def update_integration_variables(self):
         self.alpha = 0.5 / self.sigma**2
-        self.cos_theta = m.cos(self.theta)
+        self.cos_theta = np.cos(self.theta.imag)
 
 
     def integral(self, g):
@@ -1273,9 +1368,22 @@ class Gaussian():
         one_over_zeta = 1.0 / (self.alpha + g.alpha)
         xi = 0.5 * one_over_zeta
         dist = self.mu - g.mu
-        intg = (np.pi * one_over_zeta)**1.5 * exp(-xi * dist**2)
+        exp = np.exp(-xi * dist**2)
+        intg = (np.pi * one_over_zeta)**1.5 * exp \
                 * self.cos_theta * g.cos_theta
         return intg
+
+
+    def accumulate(self, gaussian):
+        self.mu += gaussian.mu
+        self.sigma += gaussian.sigma
+        self.theta += gaussian.theta
+
+
+    def average(self, total_count):
+        self.mu /= total_count
+        self.sigma /= total_count
+        self.theta /= total_count
 
 
 class Hdf5():
@@ -1412,12 +1520,12 @@ def compute_overlap(pos_1, stddv_1, orien_1, pos_2, stddv_2, orien_2):
     integral = np.pi
 
 
-def campaign(sim_control, world, hdf5):
+def campaign(sim_control, settings, world, hdf5):
 
     # One-time activities as the start of a campaign.
 
     # - Create the set of politicians who will be campaigning.
-    world.repopulate_politicians()
+    world.repopulate_politicians(settings)
 
     # - Ask each citizen to clear their list of known politicians.
     for citizen in world.citizens:
@@ -1430,39 +1538,57 @@ def campaign(sim_control, world, hdf5):
 
     # Campaign activities executed with each time step:
     for step in range(sim_control.num_campaign_steps):
+        print (f"step={step}")
+
+        # - Compute the average properties of the citizens in each zone.
+        for zone_type in world.zones:
+            for zone in zone_type:
+                zone.compute_zone_averages(world)
 
         # - Politicians move randomly to another patch within the same zone. (Perhaps in the
         #   future politicians could move to more specific locations within their zone.)
         for politician in world.politicians:
             politician.move()
+        print ("moved politicians")
 
         # - Politicians modify their personality and policy positions according to the
         #   new environment.
         for politician in world.politicians:
             politician.adapt_to_patch(world)
+        print ("politicians adapted")
 
         # - Citizens compute all the necessary overlap integrals.
         for citizen in world.citizens:
-            citizen.compute_all_overlaps()
+            citizen.compute_all_overlaps(world)
+        print ("overlaps computed")
+
+        # - Citizens prepare to have their state influenced.
+        for citizen in world.citizens:
+            citizen.prepare_for_influence(world.num_policy_dims, world.num_trait_dims)
+        print ("prepped for influence")
 
         # - Citizens modify their personality and policy positions under the influence of the
         #   politician persuasion efforts.
         for citizen in world.citizens:
-            citizen.respond_to_politician_influence()
+            citizen.build_response_to_politician_influence()
+        print ("built response to influence")
 
         # - Citizens modify their personality and policy positions under the influence of their
         #   well_being.
         for citizen in world.citizens:
-            citizen.respond_to_well_being()
+            citizen.build_response_to_well_being()
+        print ("built response to well being")
 
         # - Citizens modify their personality and policy positions under the influence of their
         #   fellow citizens.
         for citizen in world.citizens:
-            citizen.respond_to_citizen_collective()
+            citizen.build_response_to_citizen_collective()
+        print ("built response to collective")
 
         # - Citizens make a preliminary assessment about who they will vote for.
         for citizen in world.citizens:
-            citizen.rank_candidates()
+            citizen.score_candidates(world)
+        print ("candidates scored")
 
     # One-time activities at the end of a campaign.
     
@@ -1488,16 +1614,16 @@ def vote(sim_control, world):
     # Each citizen decides whether they will vote or not. The participation probability
     #   is initialized at the average participation rate for eligible voters in the USA.
     #   Then, if they vote, each citizen decides who they will vote and stores the result.
-    foreach citizen in (world.citizens):
-        citizen.vote()
+    for citizen in (world.citizens):
+        citizen.vote(world)
 
     # Each politician collects votes from the citizens of their zone.
-    foreach politician in (world.politicians):
+    for politician in (world.politicians):
         politician.count_votes()
 
     # Examine the votes collected by each politician in a given zone and execute a change
     #   of governance.
-    foreach politician in (world.politicians):
+    for politician in (world.politicians):
         politician.update_status()
 
     # The participation probability will be high when there is strong personality alignment
@@ -1521,7 +1647,7 @@ def main():
     # Get script settings from a combination of the resource control file
     #   and parameters given by the user on the command line.
     settings = ScriptSettings()
-    if (settings.verbose): print ("Settings Made")
+    #if (settings.verbose): print ("Settings Made")
 
     # Read the provided input file.
     settings.read_input_file()
@@ -1549,7 +1675,7 @@ def main():
     # Start executing the main activities of the program.
     for cycle in range(sim_control.num_cycles):
         print ("cycle = ", cycle)
-        campaign(sim_control, world, hdf5)
+        campaign(sim_control, settings, world, hdf5)
 
         vote(sim_control, world)
 

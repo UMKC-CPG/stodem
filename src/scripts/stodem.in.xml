@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <stodem Version="1.0" xmlns:sd="http://www.w3.org/2001/XInclude">
    <sim_control>
-      <num_cycles>1</num_cycles>
+      <num_cycles>2</num_cycles>
       <num_campaign_steps>10</num_campaign_steps>
       <num_govern_steps>50</num_govern_steps>
       <num_primary_campaign_steps>10</num_primary_campaign_steps>
@@ -62,14 +62,20 @@
       <trait_aver_stddev_stddev>2</trait_aver_stddev_stddev>
       <trait_aver_orien_stddev>imaginary</trait_aver_orien_stddev>
       <policy_trait_ratio_stddev>0.2</policy_trait_ratio_stddev>
-      <participation_prob>0.65</participation_prob>
+      <participation_prob_pos>0.65</participation_prob_pos>
+      <participation_prob_stddev>0.15</participation_prob_stddev>
    </citizens>
    <politicians>
-      <policy_pos_stddev>2</policy_pos_stddev>
-      <policy_stddev_stddev>2</policy_stddev_stddev>
-      <policy_orien>uniform</policy_orien>
-      <trait_pos_stddev>2</trait_pos_stddev>
-      <trait_stddev_stddev>2</trait_stddev_stddev>
+      <policy_pref_pos_stddev>2</policy_pref_pos_stddev>
+      <policy_pref_stddev_stddev>2</policy_pref_stddev_stddev>
+      <policy_pref_orien_stddev>uniform</policy_pref_orien_stddev>
+      <policy_aver_pos_stddev>2</policy_aver_pos_stddev>
+      <policy_aver_stddev_stddev>2</policy_aver_stddev_stddev>
+      <policy_aver_orien_stddev>uniform</policy_aver_orien_stddev>
+      <trait_innate_pos_stddev>2</trait_innate_pos_stddev>
+      <trait_innate_stddev_stddev>2</trait_innate_stddev_stddev>
+      <trait_ext_pos_stddev>2</trait_ext_pos_stddev>
+      <trait_ext_stddev_stddev>2</trait_ext_stddev_stddev>
       <policy_influence_stddev>2</policy_influence_stddev>
       <trait_influence_stddev>2</trait_influence_stddev>
       <policy_lie_stddev>2</policy_lie_stddev>
