@@ -423,6 +423,8 @@ class SimControl():
     num_govern_steps = 0  # Number of time steps to govern.
     num_primary_campaign_steps = 0  # Number of time steps in a primary campaign.
     total_num_steps = 0  # Total number of simulation steps.
+    data_resolution = 1 # data points per real number
+    data_neglig = 0.01 # negligability limit for determining min/max data range
 
 
     def __init__(self, settings):
@@ -435,10 +437,31 @@ class SimControl():
         SimControl.num_primary_campaign_steps = \
                 int(settings.infile_dict[1]["sim_control"]["num_primary_campaign_steps"])
 
+        # Get the resolution and negligabilty limit of the data that may be output.
+        SimControl.data_resolution = \
+                int(settings.infile_dict[1]["sim_control"]["data_resolution"])
+        SimControl.data_neglig = \
+                int(settings.infile_dict[1]["sim_control"]["data_neglig"])
+
         # Compute the total number of simulation steps.
         SimControl.total_num_steps = (SimControl.num_campaign_steps + \
                 SimControl.num_govern_steps + SimControl.num_primary_campaign_steps) * \
                 SimControl.num_cycles
+
+
+    # Consider all citizens, politicians, and the government. For each, take
+    #   the position of each policy and trait (if applicable) and compute the
+    #   maximum and minimum extent of the Gaussian (to the data negligability
+    #   limit). Use the maximum and minimum of each Gaussian to find the min
+    #   and max of every dimension. Then extend the min/max a little bit so
+    #   that (hopefully) if the ranges change during the simulation they will
+    #   not go past the limits.
+    def compute_data_range(self, settings, world):
+        
+        for citizen in World.citizens:
+            
+
+
 
 
 @dataclass
@@ -464,6 +487,8 @@ class World():
     politicians = []
     properties = []
     government = []
+    policy_limits = []
+    trait_limits = []
 
 
     def __init__(self, settings):
@@ -606,9 +631,11 @@ class World():
                                 World.patches[i][j].zone_index[zone_type]].add_patch(
                                         World.patches[i][j])
 
-        # Define the global properties types of the world.
-        self.properties.append(SimProperty("WellBeing", "WellBeing", "Scalar",
+        # Define the global property types of the world.
+        self.properties.append(SimProperty("CitizenGeoData", "WellBeing", "Scalar",
                 rng.uniform(size=(World.x_num_patches, World.y_num_patches))))
+        self.properties.append(SimProperty("CitizenData", "PolicyPref", "Scalar",
+                rng.uniform(size=(World.data_resolution, len(World.citizens))))
 
 
     def repopulate_politicians(self, settings):
@@ -1119,8 +1146,41 @@ class Citizen():
 
 
     def vote_for_candidates(self, world):
+        # The assumption is that a citizen who decides to vote, will vote for
+        #   every one of their top candidates. If a citizen decides to not
+        #   vote, then they vote for none of their candidates. (Clearly, this
+        #   could be modified so that citizens make a decision to "vote-at-all"
+        #   followed by separate decisions about making a vote for each zone.
+        #   This approach is a bit more complicated and so it is not done yet.
+        # Determine if the citizen will vote. If not, return. If so, continue.
+        if (rng.random() > self.participation_prob):
+            return
+
+        # This citizen needs to consider each zone in turn.
         for zone_index in self.current_patch.zone_index:
-            sys.exit()
+            # Consider all the politicians in this zone and identify which one
+            #   has the highest score.
+            top_politician = 0
+            pol_index = 0
+            for politician in self.politician_list:
+                # Do not consider politicians that are not of the same zone as
+                #   the current zone index.
+                if (politician.zone != zone_index):
+                    continue
+
+                # Look for a higher-scoring politician.
+                if (self.politician_score[pol_index] >
+                        self.politician_score[top_politician])
+                    top_politician = pol_index
+
+                # Go to the next politician
+                pol_index += 1
+
+            # Now that the highest scoring politician for this zone has been
+            #   found, we increment the votes that this politician has. I.e.,
+            #   we vote for the best matched politician.
+            self.politician_list[top_politician].vote += 1
+
 
 
     # Compute the relationship between this citizen's stated policy positions and the
@@ -1590,36 +1650,32 @@ def campaign(sim_control, settings, world, hdf5):
             citizen.score_candidates(world)
         print ("candidates scored")
 
-    # One-time activities at the end of a campaign.
-    
-    # - Citizens give votes to the politicians.
-    for citizen in world.citizens:
-        citizen.vote()
-
-    # - Evaluate the votes and determine who was elected.
-    for politician in world.politicians:
-        politician.update_elected_
-    
-
         # Add current world properties to the HDF5 file.
         print(world.properties[0])
         hdf5.add_dataset(world.properties[0], sim_control.curr_step)
 
         # Increment the simulation timestep counter.
         sim_control.curr_step += 1
-            
+
+    # One-time activities at the end of a campaign.
+    # None so far...
+
 
 def vote(sim_control, world):
 
-    # Each citizen decides whether they will vote or not. The participation probability
-    #   is initialized at the average participation rate for eligible voters in the USA.
-    #   Then, if they vote, each citizen decides who they will vote and stores the result.
-    for citizen in (world.citizens):
-        citizen.vote(world)
+    # - Citizens give votes to the politicians.
+    for citizen in world.citizens:
+        citizen.vote_for_candidates(world)
 
-    # Each politician collects votes from the citizens of their zone.
-    for politician in (world.politicians):
-        politician.count_votes()
+    # - Evaluate the votes and determine who was elected in each zone.
+    for zone_type in range(world.num_zone_types)
+        for zone in world.zones[zone_type]:
+            top_vote_getter = zone.politician_list[0]
+            for politician in zone.politician_list:
+                if (politician.votes > top_vote_getter.votes):
+                    top_vote_getter = politician
+            # Now that the top vote getter for this zone has been determined,
+            #   we can assign that politician as the winner.
 
     # Examine the votes collected by each politician in a given zone and execute a change
     #   of governance.
