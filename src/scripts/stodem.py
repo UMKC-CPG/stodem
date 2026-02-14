@@ -441,7 +441,7 @@ class SimControl():
         SimControl.data_resolution = \
                 int(settings.infile_dict[1]["sim_control"]["data_resolution"])
         SimControl.data_neglig = \
-                int(settings.infile_dict[1]["sim_control"]["data_neglig"])
+                float(settings.infile_dict[1]["sim_control"]["data_neglig"])
 
         # Compute the total number of simulation steps.
         SimControl.total_num_steps = (SimControl.num_campaign_steps + \
@@ -457,11 +457,56 @@ class SimControl():
     #   that (hopefully) if the ranges change during the simulation they will
     #   not go past the limits.
     def compute_data_range(self, settings, world):
-        
+
+        # Compute the extent multiplier from the negligibility threshold.
+        # At x = mu ± extent_mult * sigma, the Gaussian amplitude = data_neglig * peak
+        extent_mult = np.sqrt(-2.0 * np.log(SimControl.data_neglig))
+
+        # Initialize min/max arrays for policy and trait dimensions.
+        policy_min = np.full(world.num_policy_dims, np.inf)
+        policy_max = np.full(world.num_policy_dims, -np.inf)
+        trait_min = np.full(world.num_trait_dims, np.inf)
+        trait_max = np.full(world.num_trait_dims, -np.inf)
+
+        # Helper to update min/max from a Gaussian's extent.
+        def update_limits(gaussian, dim_min, dim_max):
+            extent = np.abs(gaussian.sigma) * extent_mult
+            dim_min[:] = np.minimum(dim_min, gaussian.mu - extent)
+            dim_max[:] = np.maximum(dim_max, gaussian.mu + extent)
+
+        # Process all citizens.
         for citizen in World.citizens:
-            
+            update_limits(citizen.stated_policy_pref, policy_min, policy_max)
+            update_limits(citizen.stated_policy_aver, policy_min, policy_max)
+            update_limits(citizen.ideal_policy_pref, policy_min, policy_max)
+            update_limits(citizen.stated_trait_pref, trait_min, trait_max)
+            update_limits(citizen.stated_trait_aver, trait_min, trait_max)
 
+        # Process all politicians.
+        for politician in World.politicians:
+            update_limits(politician.innate_policy_pref, policy_min, policy_max)
+            update_limits(politician.innate_policy_aver, policy_min, policy_max)
+            update_limits(politician.ext_policy_pref, policy_min, policy_max)
+            update_limits(politician.ext_policy_aver, policy_min, policy_max)
+            update_limits(politician.innate_trait, trait_min, trait_max)
+            update_limits(politician.ext_trait, trait_min, trait_max)
 
+        # Process government.
+        update_limits(World.government.enacted_policy, policy_min, policy_max)
+
+        # Extend the range by some factor to allow for simulation drift.
+        buffer_factor = 1.2  # 20% buffer
+        policy_range = policy_max - policy_min
+        trait_range = trait_max - trait_min
+
+        policy_min -= 0.5 * (buffer_factor - 1.0) * policy_range
+        policy_max += 0.5 * (buffer_factor - 1.0) * policy_range
+        trait_min -= 0.5 * (buffer_factor - 1.0) * trait_range
+        trait_max += 0.5 * (buffer_factor - 1.0) * trait_range
+
+        # Store the computed limits in the World class.
+        World.policy_limits = [policy_min, policy_max]
+        World.trait_limits = [trait_min, trait_max]
 
 
 @dataclass
@@ -491,7 +536,7 @@ class World():
     trait_limits = []
 
 
-    def __init__(self, settings):
+    def __init__(self, settings, sim_control):
 
         # Get the number of policy and trait dimensions.
         World.num_policy_dims = int(settings.infile_dict[1]["world"]["num_policy_dims"])
@@ -634,8 +679,8 @@ class World():
         # Define the global property types of the world.
         self.properties.append(SimProperty("CitizenGeoData", "WellBeing", "Scalar",
                 rng.uniform(size=(World.x_num_patches, World.y_num_patches))))
-        self.properties.append(SimProperty("CitizenData", "PolicyPref", "Scalar",
-                rng.uniform(size=(World.data_resolution, len(World.citizens))))
+        #self.properties.append(SimProperty("CitizenData", "PolicyPref", "Scalar",
+        #        rng.uniform(size=(sim_control.data_resolution, len(World.citizens)))))
 
 
     def repopulate_politicians(self, settings):
@@ -814,6 +859,17 @@ class Zone():
 
     def random_patch(self):
         return rng.choice(self.patches)
+
+
+    def set_elected_politician(self, top_vote_getter):
+        # Reset all politicians in this zone to the not elected state.
+        for politician in self.politician_list:
+            politician.elected = False
+
+        # Set the elected politician to the elected state and set a
+        #   specific variable pointing to it.
+        top_vote_getter.elected = True
+        self.elected_politician = top_vote_getter
 
 
 class Patch():
@@ -1128,7 +1184,7 @@ class Citizen():
 
 
     def build_response_to_well_being(self):
-        pass
+        self.well_being = sum(self.Pci_Pge_ol[0])
 
 
     def score_candidates(self, world):
@@ -1170,7 +1226,7 @@ class Citizen():
 
                 # Look for a higher-scoring politician.
                 if (self.politician_score[pol_index] >
-                        self.politician_score[top_politician])
+                    self.politician_score[top_politician]):
                     top_politician = pol_index
 
                 # Go to the next politician
@@ -1179,25 +1235,24 @@ class Citizen():
             # Now that the highest scoring politician for this zone has been
             #   found, we increment the votes that this politician has. I.e.,
             #   we vote for the best matched politician.
-            self.politician_list[top_politician].vote += 1
+            self.politician_list[top_politician].votes += 1
 
 
 
     # Compute the relationship between this citizen's stated policy positions and the
     #   actual policies as implemented by the government.
     def policy_attitude(self, government):
-        attitude = 0
+        self.attitude = 0
         for (stated, govern) in zip(self.stated_policy_pref.pos, government.policy_pos):
-            #attitude += 
-            pass
+            self.attitude += abs(stated - govern)
 
 
     # Compute the relationship between this citizen's policy positions and the ideal
     #   (unknown to the citizen) policies that will benefit this citizen the most.
     def policy_alignment(self):
-        alignment = 0 # Represents perfect alignment.
+        self.alignment = 0 # Represents perfect alignment.
         for (stated, ideal) in zip(self.stated_policy_pref.mu, self.ideal_policy_pref.mu):
-            alignment += abs(stated - ideal)
+            self.alignment += abs(stated - ideal)
 
         return alignment
 
@@ -1595,7 +1650,6 @@ def campaign(sim_control, settings, world, hdf5):
     for politician in world.politicians:
         politician.present_to_citizens(world)
 
-
     # Campaign activities executed with each time step:
     for step in range(sim_control.num_campaign_steps):
         print (f"step={step}")
@@ -1650,8 +1704,11 @@ def campaign(sim_control, settings, world, hdf5):
             citizen.score_candidates(world)
         print ("candidates scored")
 
+        # - Aggregate well being to patches for output.
+        compute_patch_well_being(world)
+
         # Add current world properties to the HDF5 file.
-        print(world.properties[0])
+        print (world.properties[0])
         hdf5.add_dataset(world.properties[0], sim_control.curr_step)
 
         # Increment the simulation timestep counter.
@@ -1661,6 +1718,24 @@ def campaign(sim_control, settings, world, hdf5):
     # None so far...
 
 
+    def compute_patch_well_being(world):
+        """Aggregate citizen well-being to the patch grid for visualization."""
+        # Initialize the well-being grid
+        wb_grid = np.zeros((World.x_num_patches, World.y_num_patches))
+        count_grid = np.zeros((World.x_num_patches, World.y_num_patches))
+
+        # Accumulate well-being from each citizen
+        for citizen in world.citizens:
+            x = citizen.current_patch.x_location
+            y = citizen.current_patch.y_location
+            wb_grid[x, y] += citizen.well_being
+            count_grid[x, y] += 1
+
+        # Average per patch (avoid division by zero)
+        count_grid[count_grid == 0] = 1
+        world.properties[0].data = wb_grid / count_grid
+
+
 def vote(sim_control, world):
 
     # - Citizens give votes to the politicians.
@@ -1668,19 +1743,19 @@ def vote(sim_control, world):
         citizen.vote_for_candidates(world)
 
     # - Evaluate the votes and determine who was elected in each zone.
-    for zone_type in range(world.num_zone_types)
+    for zone_type in range(world.num_zone_types):
         for zone in world.zones[zone_type]:
             top_vote_getter = zone.politician_list[0]
             for politician in zone.politician_list:
                 if (politician.votes > top_vote_getter.votes):
                     top_vote_getter = politician
-            # Now that the top vote getter for this zone has been determined,
-            #   we can assign that politician as the winner.
 
-    # Examine the votes collected by each politician in a given zone and execute a change
-    #   of governance.
-    for politician in (world.politicians):
-        politician.update_status()
+            # Now that the top vote getter for this zone has been determined,
+            #   we can assign that politician as the winner. We need to make sure
+            #   that the politician knows that they are elected or not elected.
+            #   We also need to make sure that the zone knows the elected
+            #   politician. This call will do both.
+            zone.set_elected_politician(top_vote_getter)
 
     # The participation probability will be high when there is strong personality alignment
     #   between the citizen and any candidate.
@@ -1714,7 +1789,7 @@ def main():
     print ("Control Settings Defined")
 
     # Initialize the simulation world.
-    world = World(settings)
+    world = World(settings, sim_control)
     print ("World Created")
     world.populate(settings)
     print ("World Populated")
