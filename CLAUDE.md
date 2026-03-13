@@ -38,18 +38,22 @@ make && make install  # Installs to $STODEM_DIR/bin
 
 ## Architecture
 
-### Core Classes (src/scripts/stodem.py)
+The codebase has been refactored from a monolithic `stodem.py` into separate modules under `src/scripts/`:
 
-- **ScriptSettings**: Configuration from XML + command line, loads defaults from `$STODEM_RC/stodemrc.py`
-- **SimControl**: Manages simulation phases (cycles, campaign steps, govern steps)
-- **World**: Main container holding patches, zones, citizens, politicians, government
-- **Zone**: Geographic region at one hierarchy level, maintains politician lists and citizen averages
-- **Patch**: Basic grid unit containing citizens, computes zone membership
-- **Citizen**: Agent with Gaussian policy/trait preferences, aversions, and ideal positions
-- **Politician**: Agent with innate and external (presented) policy/trait positions, strategies
-- **Government**: Enacts policies affecting citizen well-being
-- **Gaussian**: Complex Gaussian functions with overlap integral computation
-- **Hdf5/Xdmf**: Output generation for data storage and Paraview visualization
+| Module | Contents |
+|---|---|
+| `stodem.py` | Entry point, design discussion comments, main simulation loop |
+| `settings.py` | `ScriptSettings` — XML + command line config, loads `$STODEM_RC/stodemrc.py` |
+| `sim_control.py` | `SimControl`, `SimProperty` — simulation phases and data range computation |
+| `world.py` | `World` — main container for patches, zones, citizens, politicians, government |
+| `zone.py` | `Zone` — geographic region at one hierarchy level |
+| `patch.py` | `Patch` — basic grid unit containing citizens |
+| `citizen.py` | `Citizen` — agent with Gaussian policy/trait preferences, aversions, ideal positions |
+| `politician.py` | `Politician` — agent with innate and external policy/trait positions, strategies |
+| `government.py` | `Government` — enacts policies affecting citizen well-being |
+| `gaussian.py` | `Gaussian` — complex Gaussian functions with overlap integral computation |
+| `output.py` | `Hdf5`, `Xdmf` — output generation for Paraview visualization |
+| `random_state.py` | Global `rng` (numpy default_rng, seed=8675309) |
 
 ### Simulation Flow
 
@@ -93,7 +97,9 @@ Key sections:
 
 ## Known Issues
 
-- `vote()` function has syntax error at line 1671 (missing colon after `for` statement)
+See `TODO.md` for a comprehensive list of bugs and incomplete sections. Key items:
+- **Runtime bugs**: `compute_patch_well_being` defined after first use; `hdf5.close` not called as method; `Citizen.policy_attitude()` uses `.pos` instead of `.mu`; zone object vs. integer comparison in `vote_for_candidates()`
 - `govern()` function is a stub (returns immediately)
-- Several influence methods contain `pass` statements needing implementation
+- Influence shifts accumulated but never applied back to citizen Gaussian parameters
+- `Politician.persuade()` is a stub and never called from campaign loop
 - Primary campaign/vote phases not implemented
