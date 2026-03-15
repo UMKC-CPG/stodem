@@ -2,7 +2,8 @@ import numpy as np
 
 
 # Mathematical form:
-#  g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2)) * exp(i theta)
+#  g(x;sigma,mu,theta) = 1/(sigma * sqrt(2 pi)) * exp(-(x-mu)^2 / (2 sigma^2))
+#                        * exp(i theta)
 #   FWHM = 2 sqrt(2 ln(2)) * sigma.
 #   alpha = 1/(2 sigma^2)
 #   zeta = alpha_1 + alpha_2 for two Gaussians
@@ -31,7 +32,8 @@ class Gaussian():
         # Get the real parts of the integral of the product of the self and
         #   g (given) Gaussians.
         #   I(G1,G2) = Integral(Re(G1)*Re(G2) dx; -infinity..+infinity)
-        #   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2) * cos(theta_1) * cos(theta_2)
+        #   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2)
+        #              * cos(theta_1) * cos(theta_2)
         one_over_zeta = 1.0 / (self.alpha + g.alpha)
         xi = 0.5 * one_over_zeta
         dist = self.mu - g.mu

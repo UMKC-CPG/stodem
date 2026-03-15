@@ -17,7 +17,8 @@ class SimControl():
     num_cycles = 0  # The number of campaign cycles.
     num_campaign_steps = 0  # Number of time steps in a campaign.
     num_govern_steps = 0  # Number of time steps to govern.
-    num_primary_campaign_steps = 0  # Number of time steps in a primary campaign.
+    # Number of time steps in a primary campaign.
+    num_primary_campaign_steps = 0
     total_num_steps = 0  # Total number of simulation steps.
     data_resolution = 1 # data points per real number
     data_neglig = 0.01 # negligability limit for determining min/max data range
@@ -25,15 +26,18 @@ class SimControl():
 
     def __init__(self, settings):
         # Extract simulation control parameters from the xml input file.
-        SimControl.num_cycles = int(settings.infile_dict[1]["sim_control"]["num_cycles"])
-        SimControl.num_campaign_steps = \
-                int(settings.infile_dict[1]["sim_control"]["num_campaign_steps"])
-        SimControl.num_govern_steps = \
-                int(settings.infile_dict[1]["sim_control"]["num_govern_steps"])
-        SimControl.num_primary_campaign_steps = \
-                int(settings.infile_dict[1]["sim_control"]["num_primary_campaign_steps"])
+        SimControl.num_cycles = int(
+                settings.infile_dict[1]["sim_control"]["num_cycles"])
+        SimControl.num_campaign_steps = int(
+                settings.infile_dict[1]["sim_control"]["num_campaign_steps"])
+        SimControl.num_govern_steps = int(
+                settings.infile_dict[1]["sim_control"]["num_govern_steps"])
+        SimControl.num_primary_campaign_steps = int(
+                settings.infile_dict[1]["sim_control"]
+                ["num_primary_campaign_steps"])
 
-        # Get the resolution and negligabilty limit of the data that may be output.
+        # Get the resolution and negligabilty limit of the data that may be
+        #   output.
         SimControl.data_resolution = \
                 int(settings.infile_dict[1]["sim_control"]["data_resolution"])
         SimControl.data_neglig = \
@@ -41,7 +45,8 @@ class SimControl():
 
         # Compute the total number of simulation steps.
         SimControl.total_num_steps = (SimControl.num_campaign_steps + \
-                SimControl.num_govern_steps + SimControl.num_primary_campaign_steps) * \
+                SimControl.num_govern_steps + \
+                SimControl.num_primary_campaign_steps) * \
                 SimControl.num_cycles
 
 
@@ -55,7 +60,8 @@ class SimControl():
     def compute_data_range(self, settings, world):
 
         # Compute the extent multiplier from the negligibility threshold.
-        # At x = mu ± extent_mult * sigma, the Gaussian amplitude = data_neglig * peak
+        # At x = mu ± extent_mult * sigma, the Gaussian amplitude =
+        #   data_neglig * peak
         extent_mult = np.sqrt(-2.0 * np.log(SimControl.data_neglig))
 
         # Initialize min/max arrays for policy and trait dimensions.

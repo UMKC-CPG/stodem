@@ -88,7 +88,8 @@ Defaults are given in $STODEM_RC/stodemrc.py.
         # Define the output file prefix.
         parser.add_argument('-o', '--outfile', dest='outfile', type=ascii,
                             default=self.outfile, help='Output file name ' +
-                            f'prefix for hdf5 and xdmf. Default: {self.outfile}')
+                            f'prefix for hdf5 and xdmf. ' +
+                            f'Default: {self.outfile}')
 
 
     def reconcile(self, args):
@@ -113,6 +114,7 @@ Defaults are given in $STODEM_RC/stodemrc.py.
         root = tree.getroot()
 
         def recursive_dict(element):
-            return (element.tag, dict(map(recursive_dict, element)) or element.text)
+            return (element.tag,
+                    dict(map(recursive_dict, element)) or element.text)
 
         self.infile_dict = recursive_dict(root)

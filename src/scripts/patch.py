@@ -3,8 +3,8 @@ import numpy as np
 
 class Patch():
 
-    def __init__(self, settings, i, j, x_num_patches, y_num_patches, num_zone_types,
-            zone_types):
+    def __init__(self, settings, i, j, x_num_patches, y_num_patches,
+            num_zone_types, zone_types):
 
         # Initialize the properties of this patch.
         self.zone_index = []
@@ -14,12 +14,14 @@ class Patch():
         # Determine the properties of this patch.
 
         # Initialize the number of citizens on this patch.
-        self.num_citizens = int(settings.infile_dict[1]["patch"]["initial_num_citizens"])
+        self.num_citizens = int(
+                settings.infile_dict[1]["patch"]["initial_num_citizens"])
 
-        # Compute the set of zone index numbers for this patch. All patches of a given
-        #   zone and zone type will have the same index number. Index numbers are computed
-        #   contiguously from 0, and increasing by 1 for each "zone-sized" step in the
-        #   x-direction and increasing by the number of zones in a row for each row in the
+        # Compute the set of zone index numbers for this patch. All patches of
+        #   a given zone and zone type will have the same index number. Index
+        #   numbers are computed contiguously from 0, and increasing by 1 for
+        #   each "zone-sized" step in the x-direction and increasing by the
+        #   number of zones in a row for each row in the
         #   y-direction.
         for zone_type in range(num_zone_types):
             #print("i,j,zone_type =",i,j,zone_type)

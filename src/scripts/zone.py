@@ -6,11 +6,20 @@ from random_state import rng
 
 class Zone():
 
-    def __init__(self, settings, zone_type, patch):
+    def __init__(self, settings, zone_type, zone_index, patch):
         self.zone_type = zone_type
+
+        # Store the integer index of this zone within the World.zones[zone_type]
+        # list. This is needed so that citizens can identify which zone a
+        # politician belongs to by comparing politician.zone.zone_index against
+        # the integer entries in patch.zone_index (which are parallel arrays
+        # indexed by zone_type).
+        self.zone_index = zone_index
+
         self.patches = [patch]
 
-        # Get the statistical parameters for the number of politicians for this zone.
+        # Get the statistical parameters for the number of politicians for
+        #   this zone.
         self.min_politicians = int(settings.infile_dict[1]["world"]
                 [f"zone_type_{zone_type}"]["min_politicians"])
         self.max_politicians = int(settings.infile_dict[1]["world"]
@@ -28,11 +37,12 @@ class Zone():
         elif (self.num_politicians > self.max_politicians):
             self.num_politicians = self.max_politicians
 
-        # Each zone maintains a list of the politicians who vie for election in it.
+        # Each zone maintains a list of the politicians who vie for election
+        #   in it.
         self.politician_list = []
 
-        # Each zone maintains a list of the citizen average values for each policy and
-        #   trait preference and aversion.
+        # Each zone maintains a list of the citizen average values for each
+        #   policy and trait preference and aversion.
         self.avg_Pcp = []
         self.avg_Pca = []
         self.avg_Tcp = []
@@ -66,12 +76,17 @@ class Zone():
         for patch in self.patches:
             self.curr_num_citizens += len(patch.citizen_list)
             for citizen in patch.citizen_list:
-                self.avg_Pcp.accumulate(world.citizens[citizen].stated_policy_pref)
-                self.avg_Pca.accumulate(world.citizens[citizen].stated_policy_aver)
-                self.avg_Tcp.accumulate(world.citizens[citizen].stated_trait_pref)
-                self.avg_Tca.accumulate(world.citizens[citizen].stated_trait_aver)
+                self.avg_Pcp.accumulate(
+                        world.citizens[citizen].stated_policy_pref)
+                self.avg_Pca.accumulate(
+                        world.citizens[citizen].stated_policy_aver)
+                self.avg_Tcp.accumulate(
+                        world.citizens[citizen].stated_trait_pref)
+                self.avg_Tca.accumulate(
+                        world.citizens[citizen].stated_trait_aver)
 
-        # Divide the values by the number of citizens that contributed to each average.
+        # Divide the values by the number of citizens that contributed to
+        #   each average.
         self.avg_Pcp.average(self.curr_num_citizens)
         self.avg_Pca.average(self.curr_num_citizens)
         self.avg_Tcp.average(self.curr_num_citizens)

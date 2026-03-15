@@ -12,7 +12,7 @@ election phase, and several utility functions.
 
 ## Bugs (Code That Will Fail at Runtime)
 
-### 1. `compute_patch_well_being` called before it is defined — `stodem.py`
+### 1. RESOLVED `compute_patch_well_being` called before it is defined — `stodem.py`
 
 `compute_patch_well_being(world)` is called at line 365 inside the campaign `for` loop, but
 the function is defined as a nested `def` at line 378, *after* the loop body ends. In Python,
@@ -20,25 +20,28 @@ a nested `def` only creates the function when that line executes. Since the loop
 calling the function on line 365 will raise a `NameError`. The function definition needs to
 be moved above the loop, or promoted to a module-level function.
 
-### 2. `hdf5.close` is a property reference, not a method call — `stodem.py`
+### 2. RESOLVED `hdf5.close` is a property reference, not a method call — `stodem.py`
 
 At the end of `main()`, `hdf5.close` reads a property but never calls it. It should be
 `hdf5.close()`. Additionally, the `Hdf5` class never defines a `close()` method, so this
 will raise an `AttributeError` regardless. A `close()` method that calls `Hdf5.h_fid.close()`
 needs to be added to the `Hdf5` class in `output.py`.
 
-### 3. `Citizen.policy_attitude()` references non-existent attribute — `citizen.py`
+### 3. RESOLVED `Citizen.policy_attitude()` references non-existent attribute — `citizen.py`
 
 `policy_attitude()` accesses `self.stated_policy_pref.pos`, but the `Gaussian` class stores
 this value as `.mu`, not `.pos`. This will raise an `AttributeError` when called.
 
-### 4. Zone object vs. integer comparison in `vote_for_candidates()` — `citizen.py`
+### 4. RESOLVED Zone object vs. integer comparison in `vote_for_candidates()` — `citizen.py`
 
-In `vote_for_candidates()`, the check `if (politician.zone != zone_index)` compares
+In `vote_for_candidates()`, the check `if (politician.zone != zone_index)` compared
 `politician.zone`, which is a `Zone` object, against `zone_index`, which is an integer
-drawn from `patch.zone_index`. These types will never be equal, so every politician will
-be skipped. The intended comparison is likely against the politician's zone index within
-the current zone type.
+drawn from `patch.zone_index`. These types will never be equal, so every politician was
+skipped. Fixed by: (1) adding `self.zone_index` to `Zone.__init__` (passed from
+`curr_zone_index[zone_type]` in `world.py`); (2) switching the loop to
+`enumerate(self.current_patch.zone_index)` to track `zone_type` alongside `zone_index`;
+(3) filtering on both `politician.zone_type != zone_type` and
+`politician.zone.zone_index != zone_index` to unambiguously identify the zone.
 
 ---
 
@@ -109,7 +112,7 @@ from `main()` or anywhere else.
 
 ## Logic / Design Gaps
 
-### 14. `score_candidates()` ignores `policy_trait_ratio` — `citizen.py`
+### 14. RESOLVED `score_candidates()` ignores `policy_trait_ratio` — `citizen.py`
 
 The design specifies that policy and trait overlap integrals should be weighted against
 each other by `self.policy_trait_ratio`. The scoring method sums all integrals equally
@@ -149,10 +152,10 @@ exist, making the output unreadable by Paraview.
 ## To-Do List (Prioritized)
 
 ### Critical (prevent runtime)
-- [ ] Fix `compute_patch_well_being` placement — move definition above the campaign loop or make it a module-level function in `stodem.py`
-- [ ] Fix `hdf5.close` → `hdf5.close()` and add a `close()` method to `Hdf5` in `output.py`
-- [ ] Fix zone object vs. integer comparison in `Citizen.vote_for_candidates()` in `citizen.py`
-- [ ] Fix `Citizen.policy_attitude()` — change `.pos` to `.mu`
+- [x] Fix `compute_patch_well_being` placement — move definition above the campaign loop or make it a module-level function in `stodem.py`
+- [x] Fix `hdf5.close` → `hdf5.close()` and add a `close()` method to `Hdf5` in `output.py`
+- [x] Fix zone object vs. integer comparison in `Citizen.vote_for_candidates()` in `citizen.py`
+- [x] Fix `Citizen.policy_attitude()` — change `.pos` to `.mu`
 
 ### Core Simulation Physics (needed for meaningful results)
 - [ ] Apply accumulated influence shifts to citizen Gaussian parameters at the end of each campaign step (`citizen.py`)

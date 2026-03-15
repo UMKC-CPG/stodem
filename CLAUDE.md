@@ -65,9 +65,9 @@ main() → for each cycle:
 ### Key Mathematical Concepts
 
 **Complex Gaussians**: g(x;σ,μ,θ) = 1/(σ√(2π)) × exp(-(x-μ)²/(2σ²)) × exp(iθ)
-- μ (mu): position on policy axis
-- σ (sigma): spread/certainty
-- θ (theta): rotation into imaginary axis = apathy/disengagement
+- μ (mu): position on policy/trait axis — where the agent stands
+- σ (sigma): spread/certainty — strength of attachment to that position
+- θ (theta): orientation/engagement — theta=0 fully engaged, theta=π/2 fully apathetic
 
 **Overlap Integral**: Measures alignment between two Gaussians
 - I(G1,G2) = (π/ζ)^1.5 × exp(-ξd²) × cos(θ1) × cos(θ2)
@@ -79,6 +79,16 @@ main() → for each cycle:
 - Pge: Policy government enacted
 - Tcp/Tca: Trait citizen preference/aversion
 - Tpx: Trait politician external
+
+### Core Interaction Physics
+
+Detailed design documentation is in `stodem.py` (line 226+). Key principles:
+
+- **Trait gates policy**: Trait overlap magnitude determines how much policy positions shift; trait overlap sign determines the type of shift (attraction vs. defensive rigidity)
+- **Engagement from |overlap|**: Both agreement and disagreement increase engagement (absolute value of overlap shifts theta toward real)
+- **Engagement decay**: Constant decay toward apathy each step (engagement_decay_rate parameter, future-dynamic)
+- **Defensive response**: Negative trait alignment causes pref sigma to narrow and aver sigma to broaden (defensive_ratio parameter, future-dynamic)
+- **Scoring weights**: policy_trait_ratio (clamped to [-0.5, +0.5]) weights policy vs. trait in candidate scoring
 
 ## Configuration (stodem.in.xml)
 
@@ -98,8 +108,8 @@ Key sections:
 ## Known Issues
 
 See `TODO.md` for a comprehensive list of bugs and incomplete sections. Key items:
-- **Runtime bugs**: `compute_patch_well_being` defined after first use; `hdf5.close` not called as method; `Citizen.policy_attitude()` uses `.pos` instead of `.mu`; zone object vs. integer comparison in `vote_for_candidates()`
+- **Runtime bugs**: All four critical bugs (1-4) have been resolved
 - `govern()` function is a stub (returns immediately)
-- Influence shifts accumulated but never applied back to citizen Gaussian parameters
+- Influence shifts accumulated but never applied back to citizen Gaussian parameters (accumulation code also has bugs — see TODO #8)
 - `Politician.persuade()` is a stub and never called from campaign loop
 - Primary campaign/vote phases not implemented
