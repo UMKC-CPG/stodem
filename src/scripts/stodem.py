@@ -268,21 +268,23 @@
 #       magnitude.
 #
 #   If sign < 0 (citizen dislikes the source based on personality):
-#     - No mu movement. The citizen will not change their position.
+#     - No preference mu movement. The citizen will not change their
+#       stated policy preference position.
 #     - Preference sigma narrows, proportional to magnitude. The citizen
 #       becomes more rigid and attached to their current position.
-#     - Aversion sigma broadens, proportional to magnitude multiplied by
-#       a defensive_ratio parameter. The citizen becomes more broadly
-#       averse as a defensive response.
-#     The defensive_ratio is initially 1.0 (pref narrowing and aver
-#       broadening change by the same amount) but is stored as a
-#       variable so that it can be made dynamic in the future.
+#     - Aversion mu shifts toward the source's policy positions,
+#       proportional to magnitude multiplied by a defensive_ratio
+#       parameter. This is a targeted backlash: the citizen develops a
+#       specific aversion to the policies of the disliked source rather
+#       than becoming diffusely averse to a broad range of policies.
+#     The defensive_ratio is initially 1.0 but is stored as a variable
+#       so that it can be made dynamic in the future.
 #
 #   The physical interpretation: people who feel personality affinity
 #     with an influence source are susceptible to adopting that source's
 #     policy positions. People who feel personality aversion become
-#     defensive — they dig in on their existing preferences and broaden
-#     their aversions against perceived policy threats.
+#     defensive — they dig in on their existing preferences and develop
+#     a targeted aversion to the disliked source's specific policies.
 #
 # ---------------------------------------------------------------------------
 # Engagement decay
@@ -369,12 +371,13 @@
 #       politician's policy_influence parameter.
 #
 #   If the citizen dislikes the politician (negative trait sum):
-#     - No mu movement for preferences or aversions.
+#     - No preference mu movement. The citizen will not change their
+#       stated policy preference position.
 #     - Citizen policy preference sigma narrows (citizen becomes more
 #       rigid), proportional to |trait_sum| * policy_influence.
-#     - Citizen policy aversion sigma broadens (citizen becomes more
-#       broadly averse), proportional to |trait_sum| * policy_influence
-#       * defensive_ratio.
+#     - Citizen policy aversion mu shifts toward the politician's
+#       apparent policy positions (targeted backlash), proportional to
+#       |trait_sum| * policy_influence * defensive_ratio.
 #
 # --- Politician-driven citizen trait shifts and spreads ---
 #
@@ -405,9 +408,10 @@
 #       adopting community policy views.
 #
 #   If the citizen has negative trait overlap with the community:
-#     - No policy mu movement.
-#     - Policy preference sigma narrows; policy aversion sigma broadens
-#       (by defensive_ratio).
+#     - No policy preference mu movement.
+#     - Policy preference sigma narrows (citizen becomes more rigid).
+#     - Policy aversion mu shifts toward the community's policy
+#       positions (targeted backlash, scaled by defensive_ratio).
 #     The citizen feels alienated and becomes more rigid.
 #
 # --- Citizen-driven citizen trait shifts and spreads ---
@@ -434,10 +438,130 @@
 # ---------------------------------------------------------------------------
 #
 # The governing phase updates the government's enacted policy based on
-#   elected politicians and computes citizen well-being from the
-#   alignment between each citizen's ideal policy positions and the
-#   government's enacted policies. Well-being then feeds back into
-#   citizen engagement and participation probability for the next cycle.
+#   elected politicians and computes citizen well-being.
+#
+# ===========================================================================
+# Well-being, resource, and resentment — WORK IN PROGRESS
+# ===========================================================================
+#
+# The design below is exploratory and NOT settled. The relationships
+#   between these concepts need further discussion before implementation.
+#   What follows captures the current thinking and candidate models.
+#
+# --- Perceived satisfaction (relatively settled) ---
+#
+# Perceived satisfaction is the direct overlap between a citizen's
+#   stated policy preferences and the government's enacted policies:
+#   overlap(Pcp, Pge). This is straightforward to compute and represents
+#   how satisfied the citizen *feels* about current governance. A citizen
+#   whose stated preferences align with enacted policy feels satisfied,
+#   regardless of whether those policies actually benefit them.
+#   Perceived satisfaction likely contributes to well-being, but the
+#   exact relationship is not yet determined.
+#
+# --- Resource (candidate concept, under discussion) ---
+#
+# Resource is an abstract economic stock per citizen — an accumulated
+#   material state that serves as the primary driver of well-being.
+#   It is motivated by the observation that economic conditions are
+#   often the dominant factor in a person's well-being. Key properties:
+#
+#   Accumulation with inertia: Resource grows or shrinks based on the
+#     alignment between a citizen's ideal policy positions and the
+#     government's enacted policies, but this happens gradually:
+#       resource(t+1) = clamp(resource(t) + α * overlap(Pci, Pge, t),
+#                             floor, ceiling)
+#     This provides the inertia/lag that prevents instantaneous policy
+#     effects. Enacted policy changes the *rate* of resource change,
+#     not the resource level directly.
+#
+#   Asymmetric dynamics: Depletion may be faster than accumulation
+#     (α_loss vs α_gain), reflecting the asymmetry between destroying
+#     and creating wealth. The exact rates are TBD.
+#
+#   Floor and ceiling: Resource has hard bounds. A citizen at the floor
+#     is in crisis regardless of enacted policy. This creates a
+#     nonlinearity — low-resource citizens are more sensitive to policy.
+#
+#   Diminishing returns: The mapping from resource to well-being
+#     contribution is concave (e.g., log or sqrt). Going from 0.1 to
+#     0.2 matters enormously; going from 0.8 to 0.9 matters much less.
+#
+#   Note: The lag in resource naturally produces phase effects — a
+#     citizen may have high resource during poor policy (still
+#     benefiting from prior good policy) and low resource during good
+#     policy (still suffering from prior poor policy).
+#
+# --- Well-being (candidate model, under discussion) ---
+#
+# Well-being is a composite scalar per citizen. Candidate inputs:
+#
+#   well_being = f(
+#       resource(t),                  # accumulated material state
+#       perceived_satisfaction(t),    # immediate feeling about policy
+#       community_fit(t),             # trait overlap with zone averages
+#       policy_consistency(t),        # stated vs ideal pref alignment
+#       policy_stability(t),          # how much Pge has changed recently
+#   )
+#
+#   The exact functional form is TBD. Brief notes on each input:
+#
+#   resource: Primary driver. Concave mapping (diminishing returns).
+#
+#   perceived_satisfaction: Immediate. A citizen can feel satisfied
+#     even when policy is objectively harmful, or dissatisfied when
+#     policy is objectively beneficial.
+#
+#   community_fit: Trait overlap with zone averages. Social belonging
+#     affects well-being independently of policy and economics.
+#
+#   policy_consistency: Distance between stated and ideal preferences.
+#     A citizen whose stated preferences have drifted far from their
+#     ideal (e.g., due to politician or community influence) may
+#     experience internal dissonance that erodes well-being.
+#
+#   policy_stability: Variance of Pge over a rolling window. Rapid
+#     policy change is destabilizing regardless of whether the policy
+#     is good or bad. Citizens benefit from predictability.
+#
+# --- Resentment (candidate concept, under discussion) ---
+#
+# Resentment is a separate scalar driven by the gap between a
+#   citizen's resource and the zone average resource. It is NOT
+#   folded into well-being because it represents a different kind
+#   of political state. Key properties:
+#
+#   Asymmetric: Being below the zone average generates resentment.
+#     Being above the zone average does NOT generate an inverse
+#     effect — it may instead produce complacency or disengagement
+#     (indifference), which is behaviorally distinct.
+#
+#   Separate behavioral channels: Resentment could affect:
+#     - policy_trait_ratio: Resentful citizens may shift toward
+#       weighting traits more heavily, voting on "who they trust"
+#       rather than policy positions. This creates an emergent
+#       dynamic: inequality → resentment → trait-driven voting →
+#       politicians winning on personality over policy.
+#     - Aversion intensity and susceptibility to influence.
+#     - Trait shifts (who the citizen identifies with).
+#
+#   Orthogonal to well-being and engagement: A resentful citizen can
+#     have moderate well-being (getting by, but others do better).
+#     A resentful citizen is likely highly engaged — resentment is
+#     motivating, not apathy-inducing.
+#
+# --- Engagement vs. happiness vs. resentment ---
+#
+# These are three independent axes:
+#   Engagement (theta): Apathy about the political process.
+#   Happiness/well-being: Personal material and social state.
+#   Resentment: Relative economic standing, socially driven.
+#
+# An unhappy citizen can be engaged or disengaged. A resentful
+#   citizen can have moderate well-being. A disengaged citizen is
+#   not necessarily unhappy or resentful — just apathetic.
+#   The engagement decay rate should NOT be tied to well-being
+#   or resentment directly.
 
 #import pudb
 #pudb.set_trace()
