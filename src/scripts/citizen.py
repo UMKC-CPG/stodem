@@ -26,16 +26,9 @@ class Citizen():
     #   preference may easily be different from whatever number actually
     #   benefits them the most.
 
-    # Citizens have a probability of participation. It is affected (in no
-    #   order) by:
-    #   (1) The personality alignment between a citizen and a politician.
-    #   (2) The cumulative policy position alignment between a citizen and a
-    #       politician.
-    #   (3) Whether or not the citizen voted previously.
-    #   (4) The number of citizens in the same zone that vote in agreement
-    #       with the citizen.
-    #   (5) The well-being of the citizen.
-    #   (6) Whether the person that they voted for last time won or not.
+    # Citizens have a probability of participation that is computed from
+    #   their average engagement: P(vote) = mean(|cos(theta)|) across all
+    #   stated Gaussians. This is recomputed each time the citizen votes.
 
     # Citizens have a well-being factor that weights the degree to which
     #   they will use personality or policy alignment when deciding how to
@@ -51,12 +44,6 @@ class Citizen():
                 settings.infile_dict[1]["world"]["num_trait_dims"])
 
         # Define the initial instance variables of this citizen.
-
-        # Define instance variables given in the input file.
-        self.participation_prob = rng.normal(loc=float(
-                settings.infile_dict[1]["citizens"]["participation_prob_pos"]),
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["participation_prob_stddev"]))
 
         # For each policy, create a preference. The preference is represented
         #   using a Gaussian function that is centered near 0 (following a
@@ -356,6 +343,27 @@ class Citizen():
             pol_index += 1
 
 
+    def compute_vote_probability(self):
+        # Compute the probability that this citizen will vote based on their
+        #   average engagement across all stated Gaussians. Each Gaussian's
+        #   cos(theta) measures engagement: 1 = fully engaged, 0 = fully
+        #   apathetic. The mean across all stated policy and trait Gaussians
+        #   gives a natural vote probability.
+        #
+        # Note: In the future, a discriminability term could be included.
+        #   The idea is that if a citizen's top candidate score is barely
+        #   above the second-best, the citizen has weak preference among
+        #   candidates and may be less motivated to vote. The magnitude of
+        #   the score gap between the top two candidates could multiply the
+        #   engagement-based probability.
+        all_cos_theta = np.concatenate([
+                self.stated_policy_pref.cos_theta,
+                self.stated_policy_aver.cos_theta,
+                self.stated_trait_pref.cos_theta,
+                self.stated_trait_aver.cos_theta])
+        self.participation_prob = np.mean(np.abs(all_cos_theta))
+
+
     def vote_for_candidates(self, world):
         # The assumption is that a citizen who decides to vote, will vote for
         #   every one of their top candidates. If a citizen decides to not
@@ -363,6 +371,10 @@ class Citizen():
         #   could be modified so that citizens make a decision to "vote-at-all"
         #   followed by separate decisions about making a vote for each zone.
         #   This approach is a bit more complicated and so it is not done yet.
+
+        # Compute the vote probability from the citizen's current engagement.
+        self.compute_vote_probability()
+
         # Determine if the citizen will vote. If not, return. If so, continue.
         if (rng.random() > self.participation_prob):
             return

@@ -53,12 +53,3 @@ class Gaussian():
         self.mu /= total_count
         self.sigma /= total_count
         self.theta /= total_count
-
-
-def compute_overlap(pos_1, stddv_1, orien_1, pos_2, stddv_2, orien_2):
-
-    # Integrate the Gaussian arrays.
-    alpha_1 = 1.0 / (2.0 * stddv_1**2)
-    alpha_2 = 1.0 / (2.0 * stddv_2**2)
-    zeta = alpha_1 + alpha_2
-    integral = np.pi

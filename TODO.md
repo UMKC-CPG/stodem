@@ -52,8 +52,8 @@ skipped. Fixed by: (1) adding `self.zone_index` to `Zone.__init__` (passed from
 `govern()` returns immediately with no implementation. This is the entire governing phase.
 Per the design, it should: update `Government.enacted_policy` based on the elected
 politicians' positions, compute citizen well-being based on alignment between
-`ideal_policy_pref` and `enacted_policy`, and feed that well-being back into participation
-probability and citizen policy shifts for the next cycle.
+`ideal_policy_pref` and `enacted_policy`, and feed that well-being back into citizen
+engagement and policy shifts for the next cycle.
 
 ### 6. `compute_overlap()` is incomplete — `gaussian.py`
 
@@ -81,9 +81,8 @@ The position and stddev shift arrays are initialized but never written to at all
 ### 9. `build_response_to_well_being()` is minimal — `citizen.py`
 
 The method computes `self.well_being` from `Pci_Pge_ol[0]`, but per the design this
-well-being value should then modulate the citizen's engagement (orientation shifts),
-participation probability, and policy position shifts. None of that downstream effect
-is implemented.
+well-being value should then modulate the citizen's engagement (orientation shifts)
+and policy position shifts. None of that downstream effect is implemented.
 
 ### 10. `Politician.move()` only implements strategy 0 — `politician.py`
 
@@ -118,12 +117,13 @@ The design specifies that policy and trait overlap integrals should be weighted 
 each other by `self.policy_trait_ratio`. The scoring method sums all integrals equally
 without applying this ratio.
 
-### 15. Participation probability is static — `citizen.py`
+### 15. RESOLVED Participation probability is now engagement-based — `citizen.py`
 
-`self.participation_prob` is drawn once at initialization and never updated. The design
-describes six factors that should dynamically influence it (personality alignment, policy
-alignment, prior voting history, zone-level agreement, well-being, and whether the
-previously supported candidate won). None of these updates are implemented.
+`participation_prob` is now computed dynamically each time a citizen votes as
+`P(vote) = mean(|cos(theta)|)` across all stated Gaussians (policy pref/aver, trait
+pref/aver). The static XML parameters (`participation_prob_pos`, `participation_prob_stddev`)
+have been removed. A future extension may add a discriminability term based on the score
+gap between the top two candidates.
 
 ### 16. `Gaussian.integral()` result is not normalized — `gaussian.py`
 
@@ -162,8 +162,8 @@ exist, making the output unreadable by Paraview.
 - [ ] Implement `Politician.persuade()` and call it from the campaign loop (`politician.py`, `stodem.py`)
 - [ ] Implement `govern()` — update `enacted_policy`, compute well-being, update participation probability (`stodem.py`, `government.py`)
 - [ ] Implement `build_response_to_well_being()` downstream effects on citizen state (`citizen.py`)
-- [ ] Apply `policy_trait_ratio` weighting in `score_candidates()` (`citizen.py`)
-- [ ] Update `participation_prob` dynamically during the simulation (`citizen.py`)
+- [x] Apply `policy_trait_ratio` weighting in `score_candidates()` (`citizen.py`)
+- [x] Compute `participation_prob` dynamically from engagement — `P(vote) = mean(|cos(theta)|)` (`citizen.py`)
 
 ### Feature Completion
 - [ ] Implement politician move strategies 1+ in `Politician.move()` (`politician.py`)

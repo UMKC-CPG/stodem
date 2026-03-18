@@ -26,6 +26,9 @@ class Hdf5():
                 Hdf5.group_gid[p.group].create_dataset(
                 f"{p.name}{i}", compression="gzip", data=p.data)
 
+    def close(self):
+        Hdf5.h_fid.close()
+
 
 class Xdmf():
 

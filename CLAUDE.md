@@ -89,13 +89,14 @@ Detailed design documentation is in `stodem.py` (line 226+). Key principles:
 - **Engagement decay**: Constant decay toward apathy each step (engagement_decay_rate parameter, future-dynamic)
 - **Defensive response**: Negative trait alignment causes pref sigma to narrow and aver sigma to broaden (defensive_ratio parameter, future-dynamic)
 - **Scoring weights**: policy_trait_ratio (clamped to [-0.5, +0.5]) weights policy vs. trait in candidate scoring
+- **Vote probability**: P(vote) = mean(|cos(theta)|) across all stated Gaussians — engagement directly determines turnout
 
 ## Configuration (stodem.in.xml)
 
 Key sections:
 - `sim_control`: num_cycles, num_campaign_steps, num_govern_steps, data_resolution
 - `world`: patch_size, num_policy_dims, num_trait_dims, zone_type_N (hierarchy config)
-- `citizens`: policy/trait stddev parameters, participation probability
+- `citizens`: policy/trait stddev parameters, policy_trait_ratio
 - `politicians`: policy/trait stddevs, influence/lie parameters, strategy probabilities
 - `government`: policy position/spread parameters
 
@@ -113,3 +114,4 @@ See `TODO.md` for a comprehensive list of bugs and incomplete sections. Key item
 - Influence shifts accumulated but never applied back to citizen Gaussian parameters (accumulation code also has bugs — see TODO #8)
 - `Politician.persuade()` is a stub and never called from campaign loop
 - Primary campaign/vote phases not implemented
+- **Resolved**: Vote probability is now computed dynamically from engagement (TODO #15)

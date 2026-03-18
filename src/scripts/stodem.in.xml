@@ -64,8 +64,6 @@
       <trait_aver_stddev_stddev>2</trait_aver_stddev_stddev>
       <trait_aver_orien_stddev>imaginary</trait_aver_orien_stddev>
       <policy_trait_ratio_stddev>0.2</policy_trait_ratio_stddev>
-      <participation_prob_pos>0.65</participation_prob_pos>
-      <participation_prob_stddev>0.15</participation_prob_stddev>
    </citizens>
    <politicians>
       <policy_pref_pos_stddev>2</policy_pref_pos_stddev>

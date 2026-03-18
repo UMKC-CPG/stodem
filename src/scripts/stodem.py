@@ -304,6 +304,30 @@
 # Voting phase
 # ---------------------------------------------------------------------------
 #
+# --- Vote probability ---
+#
+# Before casting a vote, a citizen must decide whether to participate at
+#   all. The probability of voting is determined by the citizen's average
+#   engagement across all stated Gaussians (policy preferences, policy
+#   aversions, trait preferences, trait aversions):
+#
+#     P(vote) = mean(|cos(theta)|)  over all stated Gaussians
+#
+#   A citizen whose Gaussians are mostly real (theta near 0) is highly
+#   engaged across many issues and is very likely to vote. A citizen
+#   whose Gaussians are mostly imaginary (theta near pi/2) is disengaged
+#   and unlikely to vote. This emerges naturally from the engagement
+#   mechanics: campaigns and citizen-citizen interactions drive theta
+#   toward real, while engagement decay drives theta toward imaginary.
+#
+#   Future extension: A discriminability term could be included. If a
+#   citizen's top candidate score is barely above the second-best, the
+#   citizen has weak preference among candidates and may be less
+#   motivated to vote. The score gap between the top two candidates
+#   could multiply the engagement-based probability.
+#
+# --- Candidate selection ---
+#
 # A citizen decides who to vote for by computing the comprehensive
 #   citizen-politician integration set for each eligible politician. The
 #   accumulated and weighted (policy vs. trait) sum that has the highest
