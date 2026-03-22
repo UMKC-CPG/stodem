@@ -82,7 +82,8 @@ main() → for each cycle:
 
 ### Core Interaction Physics
 
-Detailed design documentation is in `stodem.py` (line 226+). Key principles:
+Full architectural design is in `DESIGN.md`. Design
+comments also in `stodem.py` (line 226+). Key principles:
 
 - **Trait gates policy**: Trait overlap magnitude determines how much policy positions shift; trait overlap sign determines the type of shift (attraction vs. defensive rigidity)
 - **Engagement from |overlap|**: Both agreement and disagreement increase engagement (absolute value of overlap shifts theta toward real)
@@ -108,10 +109,18 @@ Key sections:
 
 ## Known Issues
 
-See `TODO.md` for a comprehensive list of bugs and incomplete sections. Key items:
-- **Runtime bugs**: All four critical bugs (1-4) have been resolved
-- `govern()` function is a stub (returns immediately)
-- Influence shifts accumulated but never applied back to citizen Gaussian parameters (accumulation code also has bugs — see TODO #8)
-- `Politician.persuade()` is a stub and never called from campaign loop
-- Primary campaign/vote phases not implemented
-- **Resolved**: Vote probability is now computed dynamically from engagement (TODO #15)
+See `TODO.md` for a comprehensive list. Key items:
+- **Runtime bugs**: All four critical bugs (1-4) resolved
+- `govern()` function is a stub (TODO #5)
+- `build_response_to_politician_influence()` and
+  `build_response_to_citizen_collective()` have
+  accumulation bugs: list extension instead of
+  per-dimension addition, missing politician/zone
+  indexing, missing absolute values (TODO #19, #20)
+- Influence shifts never applied back to citizen
+  Gaussian parameters (TODO #8)
+- `Politician.persuade()` stub, never called (TODO #7)
+- Primary campaign/vote phases not implemented (TODO #12)
+- Several open design questions in `DESIGN.md`
+  (§4.2, §6.1, §8.5, §8.6.9) must be answered before
+  core physics can be fully implemented

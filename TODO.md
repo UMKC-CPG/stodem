@@ -1,179 +1,334 @@
-# STODEM Code Review: Incomplete Sections and To-Do List
+# STODEM Implementation Task List
 
 ## Summary
 
-The simulation framework is well-structured and the core data model (Gaussians, zones, patches,
-citizens, politicians, government) is largely in place. The campaign loop skeleton exists and
-data output (HDF5/XDMF) works. However, large portions of the simulation physics are stubs or
-placeholders — particularly the influence/persuasion mechanics, the governing phase, the primary
-election phase, and several utility functions.
+The simulation framework is well-structured and the
+core data model (Gaussians, zones, patches, citizens,
+politicians, government) is largely in place. The
+campaign loop skeleton exists and data output
+(HDF5/XDMF) works. However, the core interaction
+physics — influence shift mechanics, the governing
+phase, and several agent strategies — are stubs or
+placeholders.
+
+This document tracks concrete implementation tasks.
+Architectural design and mathematical specifications
+are in `DESIGN.md`. Items are numbered for stable
+cross-referencing; gaps in numbering indicate resolved
+items (see Resolved Items below).
 
 ---
 
-## Bugs (Code That Will Fail at Runtime)
+## Resolved Items
 
-### 1. RESOLVED `compute_patch_well_being` called before it is defined — `stodem.py`
+The following issues have been fixed and are recorded
+here for reference:
 
-`compute_patch_well_being(world)` is called at line 365 inside the campaign `for` loop, but
-the function is defined as a nested `def` at line 378, *after* the loop body ends. In Python,
-a nested `def` only creates the function when that line executes. Since the loop runs first,
-calling the function on line 365 will raise a `NameError`. The function definition needs to
-be moved above the loop, or promoted to a module-level function.
-
-### 2. RESOLVED `hdf5.close` is a property reference, not a method call — `stodem.py`
-
-At the end of `main()`, `hdf5.close` reads a property but never calls it. It should be
-`hdf5.close()`. Additionally, the `Hdf5` class never defines a `close()` method, so this
-will raise an `AttributeError` regardless. A `close()` method that calls `Hdf5.h_fid.close()`
-needs to be added to the `Hdf5` class in `output.py`.
-
-### 3. RESOLVED `Citizen.policy_attitude()` references non-existent attribute — `citizen.py`
-
-`policy_attitude()` accesses `self.stated_policy_pref.pos`, but the `Gaussian` class stores
-this value as `.mu`, not `.pos`. This will raise an `AttributeError` when called.
-
-### 4. RESOLVED Zone object vs. integer comparison in `vote_for_candidates()` — `citizen.py`
-
-In `vote_for_candidates()`, the check `if (politician.zone != zone_index)` compared
-`politician.zone`, which is a `Zone` object, against `zone_index`, which is an integer
-drawn from `patch.zone_index`. These types will never be equal, so every politician was
-skipped. Fixed by: (1) adding `self.zone_index` to `Zone.__init__` (passed from
-`curr_zone_index[zone_type]` in `world.py`); (2) switching the loop to
-`enumerate(self.current_patch.zone_index)` to track `zone_type` alongside `zone_index`;
-(3) filtering on both `politician.zone_type != zone_type` and
-`politician.zone.zone_index != zone_index` to unambiguously identify the zone.
+| # | Issue | File | Resolution |
+|---|-------|------|------------|
+| 1 | `compute_patch_well_being` called before defined | `stodem.py` | Moved definition above campaign loop |
+| 2 | `hdf5.close` property ref, not method call | `output.py` | Changed to `hdf5.close()`; added `close()` method to `Hdf5` |
+| 3 | `Citizen.policy_attitude()` refs `.pos` not `.mu` | `citizen.py` | Changed to `.mu` |
+| 4 | Zone object vs. integer comparison in `vote_for_candidates()` | `citizen.py` | Added `zone_index` to `Zone`; filter on both `zone_type` and `zone_index` |
+| 6 | `compute_overlap()` incomplete | `gaussian.py` | Superseded by fully implemented `Gaussian.integral()` |
+| 14 | `score_candidates()` ignores `policy_trait_ratio` | `citizen.py` | Applied weighting: `w_policy = 0.5 + ratio`, `w_trait = 0.5 - ratio` |
+| 15 | Static participation probability | `citizen.py` | Now computed dynamically as `P(vote) = mean(\|cos(theta)\|)` across all stated Gaussians; removed static XML parameters |
 
 ---
 
-## Incomplete / Stub Implementations
+## Active Bugs
 
-### 5. `govern()` is an empty stub — `stodem.py`
+### 19. `build_response_to_politician_influence()` has multiple accumulation bugs — `citizen.py`
 
-`govern()` returns immediately with no implementation. This is the entire governing phase.
-Per the design, it should: update `Government.enacted_policy` based on the elected
-politicians' positions, compute citizen well-being based on alignment between
-`ideal_policy_pref` and `enacted_policy`, and feed that well-being back into citizen
-engagement and policy shifts for the next cycle.
+The current implementation has three bugs:
 
-### 6. `compute_overlap()` is incomplete — `gaussian.py`
+1. **List extension instead of per-dimension addition**:
+   `self.policy_orien_shift += self.Pcp_Ppp_ol` uses
+   Python list `+=`, which *extends* the shift list
+   with overlap list elements rather than adding
+   values per-dimension. The shift array grows with
+   each iteration instead of accumulating numeric
+   values.
 
-The function computes `alpha_1`, `alpha_2`, and `zeta` but then sets `integral = np.pi`
-with no further calculation and no `return` statement. The actual integral formula (matching
-`Gaussian.integral()`) is not finished. It is also never called anywhere.
+2. **Not indexed by politician**: Inside the
+   `for politician in self.politician_list` loop, the
+   code adds the *entire* overlap list
+   (`self.Pcp_Ppp_ol`) each iteration rather than the
+   current politician's overlap values
+   (`self.Pcp_Ppp_ol[pol_idx]`). The loop variable
+   `politician` is never used.
 
-### 7. `Politician.persuade()` does nothing — `politician.py`
+3. **Missing absolute values**: The design
+   (DESIGN.md §8.6.2) specifies that *absolute values*
+   of overlap integrals drive engagement
+   (`|I(Pcp,Ppp)|`), but the code adds raw integral
+   values without taking absolute values.
 
-The method iterates over citizens in the patch with `pass`, then adds a trivial random
-value to `world.properties[0].data`. The actual persuasion logic (shifting citizen Gaussian
-orientations, positions, and spreads based on politician–citizen overlap integrals) is
-described in detail in the design comments but not implemented. `persuade()` is also never
-called from the campaign loop.
+**Action**: Rewrite as:
+```python
+for pol_idx, politician in enumerate(
+        self.politician_list):
+    self.policy_orien_shift += (
+        np.abs(self.Pcp_Ppp_ol[pol_idx])
+        + np.abs(self.Pca_Ppa_ol[pol_idx])
+        + np.abs(self.Pcp_Ppa_ol[pol_idx])
+        + np.abs(self.Pca_Ppp_ol[pol_idx]))
+    self.trait_orien_shift += (
+        np.abs(self.Tcp_Tpx_ol[pol_idx])
+        + np.abs(self.Tca_Tpx_ol[pol_idx]))
+```
 
-### 8. Influence shifts are accumulated but never applied — `citizen.py`
+Also convert shift arrays from Python lists to numpy
+arrays in `prepare_for_influence()`.
 
-`prepare_for_influence()` initializes six shift arrays: `policy_orien_shift`,
-`policy_pos_shift`, `policy_stddev_shift`, `trait_orien_shift`, `trait_pos_shift`,
-`trait_stddev_shift`. The three `build_response_to_*()` methods accumulate values into the
-orientation shifts, but none of the shifts are ever applied back to the citizen's Gaussian
-parameters (`stated_policy_pref`, `stated_policy_aver`, `stated_trait_pref`, etc.).
-The position and stddev shift arrays are initialized but never written to at all.
+### 20. `build_response_to_citizen_collective()` has same accumulation bugs — `citizen.py`
 
-### 9. `build_response_to_well_being()` is minimal — `citizen.py`
+Same three issues as #19 applied to the citizen
+collective integrals: list extension instead of
+per-dimension addition, overlaps not indexed by zone,
+and missing absolute values.
 
-The method computes `self.well_being` from `Pci_Pge_ol[0]`, but per the design this
-well-being value should then modulate the citizen's engagement (orientation shifts)
-and policy position shifts. None of that downstream effect is implemented.
+**Action**: Fix analogously to #19, indexing by zone
+and using absolute values per DESIGN.md §8.6.2.
 
-### 10. `Politician.move()` only implements strategy 0 — `politician.py`
+### 8. Influence shifts accumulated but never applied — `citizen.py`
 
-Only strategy index 0 (random patch within zone) is coded. Strategies 1 and above
-silently do nothing. Same applies to `adapt_to_patch()`, which only handles strategy 0
-(present innate positions unchanged). Higher strategies — including pandering and
-misrepresentation via `policy_lie`, `trait_lie`, and `pander` — are unimplemented
-despite the instance variables being set in `reset_to_input()`.
+`prepare_for_influence()` initializes six shift arrays:
+`policy_orien_shift`, `policy_pos_shift`,
+`policy_stddev_shift`, `trait_orien_shift`,
+`trait_pos_shift`, `trait_stddev_shift`. The three
+`build_response_to_*()` methods accumulate values into
+the orientation shift arrays, but none of the six shift
+arrays are ever applied back to the citizen's Gaussian
+parameters (`stated_policy_pref`, `stated_policy_aver`,
+`stated_trait_pref`, `stated_trait_aver`). The position
+and stddev shift arrays are initialized but never
+written to at all.
 
-### 11. `Politician.campaign_strategy` is selected but never used — `politician.py`
+**Action**: Implement an `apply_influence_shifts()`
+method on `Citizen` and call it at the end of each
+campaign step, after all `build_response_to_*()` calls.
+The method should apply shifts to theta, mu, and sigma
+per DESIGN.md §8.6.5, enforce sigma_floor per §8.6.5,
+apply engagement decay per §8.6.6, and update derived
+variables per §8.6.7.
 
-`self.campaign_strategy` is set in `__init__` via `select_strategy()` but is never
-referenced anywhere in the code.
+Depends on: #19, #20 (fix accumulation bugs first).
 
-### 12. Primary election phase is absent — `stodem.py`
-
-The main cycle loop has commented-out calls to `primary()` and `primary_vote()`. Neither
-function exists. The primary phase is not implemented at all.
-
-### 13. `compute_data_range()` is defined but never called — `sim_control.py`
-
-This method computes policy and trait axis limits for output purposes but is never invoked
-from `main()` or anywhere else.
-
----
-
-## Logic / Design Gaps
-
-### 14. RESOLVED `score_candidates()` ignores `policy_trait_ratio` — `citizen.py`
-
-The design specifies that policy and trait overlap integrals should be weighted against
-each other by `self.policy_trait_ratio`. The scoring method sums all integrals equally
-without applying this ratio.
-
-### 15. RESOLVED Participation probability is now engagement-based — `citizen.py`
-
-`participation_prob` is now computed dynamically each time a citizen votes as
-`P(vote) = mean(|cos(theta)|)` across all stated Gaussians (policy pref/aver, trait
-pref/aver). The static XML parameters (`participation_prob_pos`, `participation_prob_stddev`)
-have been removed. A future extension may add a discriminability term based on the score
-gap between the top two candidates.
-
-### 16. `Gaussian.integral()` result is not normalized — `gaussian.py`
-
-The comment states values range from -1 to +1, but the formula returns the raw integral
-`(pi/zeta)^1.5 * exp(-xi*d^2) * cos(theta1) * cos(theta2)`, which is *not* normalized.
-Normalization requires dividing by the geometric mean of the two self-overlaps. Whether
-this is intentional or an oversight should be clarified.
-
-### 17. Mutable class-level lists in `World` — `world.py`
-
-`World.zone_types`, `World.zones`, `World.citizens`, `World.politicians`, and
-`World.properties` are declared as class-level mutable lists (e.g., `zones = []`). If
-`World` is ever instantiated more than once in a process (e.g., in tests or parameter
-sweeps), these lists will accumulate data across instances rather than resetting. Consider
-initializing them in `__init__` instead.
-
-### 18. XDMF/HDF5 step count mismatch if simulation ends early — `output.py`, `stodem.py`
-
-`Xdmf.print_xdmf_xml()` writes entries for all `total_num_steps` time steps up front,
-but HDF5 datasets are only created as each step executes. If the simulation terminates
-early (e.g., due to an error), the XDMF file will reference HDF5 datasets that do not
-exist, making the output unreadable by Paraview.
+⚠️ **TODO QUESTION**: Should influence shifts be
+applied using the susceptibility model (DESIGN.md
+§8.6.3) or the force/momentum model (DESIGN.md
+§8.6.3)? This choice must be made before position and
+spread shifts can be fully implemented. See DESIGN.md
+§8.6.9, question 1.
 
 ---
 
-## To-Do List (Prioritized)
+## Core Simulation Physics
 
-### Critical (prevent runtime)
-- [x] Fix `compute_patch_well_being` placement — move definition above the campaign loop or make it a module-level function in `stodem.py`
-- [x] Fix `hdf5.close` → `hdf5.close()` and add a `close()` method to `Hdf5` in `output.py`
-- [x] Fix zone object vs. integer comparison in `Citizen.vote_for_candidates()` in `citizen.py`
-- [x] Fix `Citizen.policy_attitude()` — change `.pos` to `.mu`
+These tasks implement the interaction mechanics needed
+for meaningful simulation results. See DESIGN.md §8
+for the full interaction physics specification.
 
-### Core Simulation Physics (needed for meaningful results)
-- [ ] Apply accumulated influence shifts to citizen Gaussian parameters at the end of each campaign step (`citizen.py`)
-- [ ] Implement `Politician.persuade()` and call it from the campaign loop (`politician.py`, `stodem.py`)
-- [ ] Implement `govern()` — update `enacted_policy`, compute well-being, update participation probability (`stodem.py`, `government.py`)
-- [ ] Implement `build_response_to_well_being()` downstream effects on citizen state (`citizen.py`)
-- [x] Apply `policy_trait_ratio` weighting in `score_candidates()` (`citizen.py`)
-- [x] Compute `participation_prob` dynamically from engagement — `P(vote) = mean(|cos(theta)|)` (`citizen.py`)
+### 21. Implement trait-gates-policy shift mechanics — `citizen.py`
 
-### Feature Completion
-- [ ] Implement politician move strategies 1+ in `Politician.move()` (`politician.py`)
-- [ ] Implement politician adapt strategies 1+ (pandering, misrepresentation) using `policy_lie`, `trait_lie`, `pander` (`politician.py`)
-- [ ] Use `campaign_strategy` in campaign behavior (`politician.py`)
-- [ ] Implement primary campaign and primary vote phases; add `primary()` and `primary_vote()` functions (`stodem.py`)
-- [ ] Complete `compute_overlap()` and integrate it into the workflow, or remove if superseded by `Gaussian.integral()` (`gaussian.py`)
-- [ ] Call `compute_data_range()` at simulation start if data axis limits are needed (`stodem.py`)
+The `build_response_to_politician_influence()` and
+`build_response_to_citizen_collective()` methods
+currently only accumulate orientation (engagement)
+shifts. Per DESIGN.md §8.1 and §8.6.3, they should
+also accumulate position (mu) and spread (sigma)
+shifts following the trait-gates-policy principle:
 
-### Robustness / Design
-- [ ] Clarify whether `Gaussian.integral()` should be normalized to [-1, +1]; implement normalization if so (`gaussian.py`)
-- [ ] Move mutable class-level list declarations into `World.__init__()` to avoid cross-instance contamination (`world.py`)
-- [ ] Address XDMF/HDF5 step count mismatch — either write XDMF incrementally or only after simulation completes (`output.py`, `stodem.py`)
+- Compute trait_sum for each influence source.
+- If positive: shift policy mu and sigma toward
+  source.
+- If negative: narrow preference sigma, shift
+  aversion mu toward source's positions (targeted
+  backlash, scaled by `defensive_ratio`).
+- Apply susceptibility function S(sigma, theta) to
+  modulate shift magnitudes.
+
+Depends on: #19, #20 (fix accumulation bugs first).
+See also: DESIGN.md §8.6.3 for full formulas.
+
+### 22. Implement engagement decay — `citizen.py`, `stodem.py`
+
+Per DESIGN.md §8.2 and §8.6.6, every simulation step,
+every citizen's theta for every stated Gaussian should
+drift toward pi/2 by `engagement_decay_rate`. This is
+applied after influence shifts (DESIGN.md §8.6.6).
+
+New parameter needed: `engagement_decay_rate`
+(DESIGN.md §8.6.8).
+
+**Action**: Add decay step in `apply_influence_shifts()`
+(or as a separate method called after it) and add the
+parameter to XML config.
+
+### 23. Expand shift arrays from 6 to 12 — `citizen.py`
+
+Per DESIGN.md §8.6.1, separate arrays are needed for
+preference and aversion Gaussians because they respond
+differently under negative trait alignment (§8.1). The
+current six arrays (three per domain: policy and trait)
+must be expanded to twelve (three per Gaussian type:
+Pcp, Pca, Tcp, Tca).
+
+Depends on: #19, #20 (fix accumulation bugs first,
+then expand).
+
+### 5. Implement `govern()` — `stodem.py`, `government.py`
+
+`govern()` returns immediately with no implementation.
+Per DESIGN.md §7.5, it should:
+
+- Update `Government.enacted_policy` based on elected
+  politicians' positions using the policy force model
+  (DESIGN.md §7.5.1).
+- Use political capital weighting
+  (DESIGN.md §7.5.2) and zone population weighting
+  (DESIGN.md §7.5.3).
+- Downstream effects (DESIGN.md §7.5.4) are handled
+  automatically by existing overlap integral code
+  once `Pge` is updated.
+
+New parameters needed: `governance_rate`.
+
+⚠️ **TODO QUESTION**: The `pander` parameter controls
+how much a politician governs based on promises vs.
+ideology (DESIGN.md §7.5.1). Currently `pander` is
+initialized but never used. Should the govern phase
+implementation include pander from the start, or should
+it initially assume all politicians govern from their
+innate positions?
+
+### 7. Implement `Politician.persuade()` — `politician.py`, `stodem.py`
+
+The method iterates over citizens in the patch with
+`pass`. The actual persuasion logic (shifting citizen
+Gaussian orientations, positions, and spreads based on
+politician-citizen overlap integrals) is described in
+DESIGN.md §8.3 and §8.6.2–§8.6.3. `persuade()` is
+also never called from the campaign loop.
+
+⚠️ **TODO QUESTION**: The current campaign loop already
+calls `build_response_to_politician_influence()` for
+each citizen, which is where politician-driven shifts
+should accumulate. Should `persuade()` be removed in
+favor of expanding
+`build_response_to_politician_influence()`, or should
+`persuade()` remain as the politician-side entry point
+that triggers the citizen-side response?
+
+### 9. Implement `build_response_to_well_being()` downstream effects — `citizen.py`
+
+The method currently only computes
+`self.well_being = sum(self.Pci_Pge_ol[0])`. Per
+DESIGN.md §7.5.4 and §8.5, well-being should modulate
+citizen engagement (orientation shifts) and potentially
+policy position shifts. The exact downstream effects
+depend on the well-being model chosen (see DESIGN.md
+§8.5).
+
+⚠️ **TODO QUESTION**: The well-being model in
+DESIGN.md §8.5 is marked as under active design.
+Should this task use the current simple implementation
+(overlap of ideal policy with enacted policy) for the
+downstream engagement modulation, or should it wait
+for the full well-being model to be designed?
+
+---
+
+## Feature Completion
+
+### 10. Implement politician move strategies 1+ — `politician.py`
+
+Only strategy 0 (random patch within zone) is coded.
+Strategies 1 and above silently do nothing.
+
+⚠️ **TODO QUESTION**: What should strategies 1 and 2
+do? The XML defines cumulative probabilities
+"0.5,0.75,1.0" for three strategies, but only
+strategy 0 has defined behavior. Are there specific
+movement patterns intended (e.g., target
+high-population patches, move toward favorable
+citizens)?
+
+### 10b. Implement politician adapt strategies 1+ — `politician.py`
+
+Only strategy 0 (present innate positions unchanged)
+is coded. Strategies 1+ — including pandering and
+misrepresentation via `policy_lie`, `trait_lie`, and
+`pander` — are unimplemented despite the instance
+variables being set in `reset_to_input()`.
+
+**Action**: Define and implement strategies 1+. See
+DESIGN.md §6.2 for the existing parameters.
+
+### 11. Use `campaign_strategy` — `politician.py`
+
+`self.campaign_strategy` is set in `__init__` via
+`select_strategy()` but is never referenced anywhere.
+
+**Action**: Define what campaign strategies control
+and implement their effects, or remove the parameter
+if not needed.
+
+### 12. Implement primary election phase — `stodem.py`
+
+The main cycle loop has commented-out calls to
+`primary()` and `primary_vote()`. Neither function
+exists.
+
+⚠️ **TODO QUESTION**: Is the primary election phase
+still in scope? If so, is there a design for how it
+differs from the general election (different candidate
+pools, intra-party competition)?
+
+### 13. Call `compute_data_range()` — `sim_control.py`, `stodem.py`
+
+`compute_data_range()` computes policy and trait axis
+limits for output but is never called. It is fully
+implemented.
+
+⚠️ **TODO QUESTION**: Should this be called at
+simulation start for visualization setup, or is it
+deferred until needed?
+
+---
+
+## Robustness / Architecture
+
+### 16. Clarify overlap integral normalization — `gaussian.py`
+
+The overlap integral formula returns raw values that
+are not normalized by the geometric mean of
+self-overlaps. Whether values are truly bounded to
+[-1, +1] depends on the Gaussian parameters. See
+DESIGN.md §4.2.
+
+⚠️ **TODO QUESTION**: Should the integral be
+normalized? If so, should normalization be done inside
+`Gaussian.integral()` or at the call sites? (See also
+DESIGN.md §4.2.)
+
+### 17. Move mutable class-level lists to `__init__()` — `world.py`
+
+`World.zone_types`, `World.zones`, `World.citizens`,
+`World.politicians`, and `World.properties` are
+class-level mutable lists. If `World` is ever
+instantiated more than once (tests, parameter sweeps),
+these would accumulate across instances. The same
+pattern exists in `SimControl` and `Hdf5`.
+
+**Action**: Move list declarations into `__init__()`.
+
+### 18. Address XDMF/HDF5 step count mismatch — `output.py`, `stodem.py`
+
+`Xdmf.print_xdmf_xml()` writes entries for all
+`total_num_steps` up front, but HDF5 datasets are
+created incrementally. If the simulation terminates
+early, the XDMF references nonexistent HDF5 datasets.
+
+**Action**: Either write XDMF incrementally alongside
+HDF5, or write XDMF only after simulation completes.
