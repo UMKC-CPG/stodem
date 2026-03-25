@@ -138,6 +138,32 @@ Each Gaussian has three parameters:
   the real axis, cos(theta), determines how much weight the
   issue carries in overlap integrals.
 
+  **Sign convention**: Preference Gaussians (Pcp, Tcp) keep
+  Im(theta) in [0, pi/2), giving cos(theta) > 0 (positive-
+  valued). Aversion Gaussians (Pca, Tca) keep Im(theta) in
+  (pi/2, pi], giving cos(theta) < 0 (negative-valued). This
+  encodes semantic attraction vs. repulsion without special-
+  casing: same-type integrals (pref x pref, aver x aver) are
+  non-negative while cross-type integrals (pref x aver) are
+  non-positive. Citizens and politicians are initialized at
+  theta = 1j for preferences (cos(1) ≈ 0.54) and theta =
+  (pi-1)j for aversions (cos(pi-1) = -cos(1) ≈ -0.54),
+  matching engagement magnitude with opposite sign. The ideal
+  policy Gaussian (Pci) is initialized at theta = 1+0j
+  (Im = 0, cos = 1, fully engaged, positive-valued).
+  Politician traits (Tpx, innate and external) are positive-
+  valued; politicians have no trait aversions.
+
+  **Initial theta distribution**: Theta is currently
+  hardcoded at initialization (1j for preferences,
+  (pi-1)j for aversions). The `*_orien_stddev` XML
+  parameters (e.g., `policy_pref_orien_stddev`) are
+  reserved for a future extension in which the initial
+  Im(theta) is drawn from a configurable distribution,
+  allowing a population of citizens and politicians with
+  varied initial engagement levels rather than a uniform
+  starting engagement. See TODO #29.
+
 Derived quantities used in integration:
 
 ```
@@ -148,14 +174,21 @@ cos_theta = cos(Im(theta))
 ### 4.2 Overlap Integral
 
 The key relationship between any two Gaussians G1 and G2 is
-their overlap integral, which measures alignment:
+their normalized overlap integral, which measures alignment
+on a bounded [-1, +1] scale:
 
 ```
-I(G1, G2) = (pi / zeta)^1.5 * exp(-xi * d^2)
-            * cos(theta_1) * cos(theta_2)
+I_norm(G1, G2) = I_raw(G1, G2) / sqrt(I(G1,G1) * I(G2,G2))
 ```
 
-where:
+where the raw integral is:
+
+```
+I_raw(G1, G2) = (pi / zeta)^1.5 * exp(-xi * d^2)
+                * cos(theta_1) * cos(theta_2)
+```
+
+and:
 
 ```
 zeta = alpha_1 + alpha_2
@@ -163,25 +196,29 @@ xi   = 1 / (2 * zeta)       = 0.5 / zeta
 d    = mu_1 - mu_2
 ```
 
+The normalization denominator factorizes across the two
+Gaussians, so each self-norm is cached per Gaussian object:
+
+```
+self_norm = sqrt(I(G,G)) = (pi * sigma^2)^0.75 * |cos(theta)|
+```
+
+This is recomputed in `update_integration_variables()` whenever
+sigma or theta change, and costs only one multiply and one
+divide per `integral()` call. Returns 0 when either agent is
+fully apathetic (cos_theta = 0).
+
 Properties of the integral:
 
 - Maximum value (+1) when both Gaussians have identical
   parameters.
 - Minimum value (-1) when parameters match except theta values
   are 0 and pi respectively.
-- When theta is restricted to [0, pi/2], the integral range
-  is [0, +1] for same-sign Gaussians.
+- Same-type integrals (pref x pref, aver x aver) are ≥ 0;
+  cross-type integrals (pref x aver) are ≤ 0, following from
+  the sign convention (see §4.1 theta sign convention).
 - Both agreement and disagreement produce large |I|; only weak
   overlap produces small |I|.
-
-⚠️ **DESIGN QUESTION (Normalization)**: The current
-implementation does not normalize the integral by dividing
-by the geometric mean of self-overlaps. Without
-normalization, the raw integral value may not be bounded
-to [-1, +1] for arbitrary Gaussian parameters. Should
-the integral be normalized? If so, should normalization
-occur inside `Gaussian.integral()` or at the call sites?
-(See also TODO #16.)
 
 ### 4.3 Gaussian Notation
 
@@ -282,8 +319,10 @@ each zone type (determined by that patch's location).
   against enacted policy. Always positive, always fully real
   (theta=0).
 - `stated_trait_pref`: Personality trait affinity. Interacts
-  with politicians' and other citizens' traits.
-- `stated_trait_aver`: Personality trait aversion.
+  with politicians' and other citizens' traits. Positive-
+  valued (same theta sign convention as stated_policy_pref).
+- `stated_trait_aver`: Personality trait aversion. Negative-
+  valued (same theta sign convention as stated_policy_aver).
 
 **Scalar state**:
 
@@ -302,12 +341,11 @@ each zone type (determined by that patch's location).
   political lies; this could be integrated into the final
   model.
 
-  ⚠️ **DESIGN QUESTION (Well-Being Scope)**: Should the
-  simple overlap-based well_being be kept as a first
-  implementation with downstream effects on engagement,
-  deferring the richer model from §8.5? Or should the
-  richer model be designed fully before implementing any
-  well-being downstream effects? (See also TODO #9.)
+  **Decision**: Implement the simple overlap-based
+  `well_being` first with downstream engagement effects.
+  Design the code so the richer model from §8.5 can slot
+  in to replace it without restructuring the call sites.
+  (See TODO #9; §8.5 for the richer model design.)
 - `participation_prob`: Probability of voting, computed
   dynamically as mean(|cos(theta)|) across all stated
   Gaussians.
@@ -315,14 +353,12 @@ each zone type (determined by that patch's location).
   (populated each campaign).
 - `politician_score`: Accumulated scores for each politician.
 
-**Influence accumulation**: During each campaign step, six
-shift arrays accumulate changes to the citizen's Gaussians
-from all influence sources before application:
-
-- `policy_orien_shift`, `policy_pos_shift`,
-  `policy_stddev_shift`
-- `trait_orien_shift`, `trait_pos_shift`,
-  `trait_stddev_shift`
+**Influence accumulation**: During each campaign step,
+twelve shift arrays accumulate changes to the citizen's
+Gaussians from all influence sources before application —
+one set of three (theta, mu, sigma) per Gaussian type
+(Pcp, Pca, Tcp, Tca). See §8.6.1. The current code uses
+only six arrays (TODO #23); these must be expanded.
 
 ### 6.2 Politicians
 
@@ -342,12 +378,22 @@ their assigned zone.
 
 **Scalar state**:
 
-- `policy_influence` / `trait_influence`: Scale factors for
-  how effectively the politician shifts citizen engagement.
+- `policy_persuasion` / `trait_persuasion`: Scale factors
+  for how effectively the politician shifts citizen Gaussians
+  during the campaign phase. `policy_persuasion` (f_pol)
+  scales policy-overlap-driven engagement and position/
+  spread shifts; `trait_persuasion` (f_trait) scales
+  trait-overlap-driven engagement shifts. Initialized in
+  `Politician.reset_to_input()` from XML stddev params;
+  applied by TODO #21.
 - `policy_lie` / `trait_lie`: Propensity to misrepresent
   positions (not yet used).
-- `pander`: Propensity to pander to citizen preferences (not
-  yet used).
+- `political_power`: Computed each govern phase from zone
+  population, margin of victory, and agreement/disagreement
+  ratio (§7.5.1). Not initialized from XML.
+- `margin_of_victory`: Computed after each election as the
+  normalized vote margin over the next-closest rival.
+  Not initialized from XML.
 - `elected`: Whether this politician won the last election.
 - `votes`: Vote count (reset each cycle).
 
@@ -355,17 +401,19 @@ their assigned zone.
 selected strategies, chosen probabilistically from cumulative
 distribution parameters in the input XML:
 
-- `move_strategy`: How the politician moves between patches.
-  Only strategy 0 (random patch in zone) is implemented.
-- `adapt_strategy`: How the politician sets apparent positions.
-  Only strategy 0 (present innate positions unchanged) is
-  implemented.
-- `campaign_strategy`: Selected but not yet used anywhere
-  (TODO #11).
-
-Only `move_strategy` 0 and `adapt_strategy` 0 are
-implemented. Higher strategies are silently no-ops
-(TODO #10, #10b).
+- `move_strategy`: How the politician moves between
+  patches each campaign step.
+  - 0: Random patch within zone.
+  - 1: Teleport to the highest-population patch in
+    the zone and stay there.
+  - 2: Cycle through the bottom half of patches
+    (sorted by population, ascending) in round-robin
+    order, visiting low-to-middle population areas.
+- `adapt_strategy`: How the politician sets apparent
+  positions. Only strategy 0 (present innate positions
+  unchanged) is implemented (TODO #10b).
+- `campaign_strategy`: Selected but not yet used
+  anywhere (TODO #11).
 
 ### 6.3 Government
 
@@ -375,7 +423,11 @@ A single `Government` instance holds:
   representing current government policy. Initialized
   randomly and currently static (govern phase is
   unimplemented — see §7.5 for design, TODO #5 for
-  implementation).
+  implementation). Once the govern phase is active,
+  `Pge.mu` and `Pge.sigma` shift each step under
+  politician forces (§7.5.3), and `Pge.sigma`
+  naturally broadens each cycle via the policy spread
+  mechanism (§7.5.4).
 
 ---
 
@@ -401,15 +453,13 @@ main()
 ### 7.2 Main Loop
 
 The simulation runs for `num_cycles` iterations. Each cycle
-consists of three phases (with two more planned):
+consists of three phases:
 
 ```
 for cycle in num_cycles:
     campaign(...)     # Multi-step campaigning phase
     vote(...)         # Single-step election
     govern(...)       # Multi-step governing phase (stub)
-    # primary(...)    # Not implemented
-    # primary_vote(...)  # Not implemented
 ```
 
 ### 7.3 Campaign Phase (Multi-Step)
@@ -495,157 +545,262 @@ The vote phase runs once per cycle after the campaign:
 
 ### 7.5 Govern Phase
 
-The govern phase runs for `num_govern_steps` time steps
-after each election. Currently a stub that returns
-immediately (TODO #5). The design below describes the
-intended mechanics.
+The govern phase runs for `num_govern_steps` time
+steps after each election. Currently a stub that
+returns immediately (TODO #5). The design below
+describes the intended mechanics.
 
-#### 7.5.1 Policy Force Model
+The govern phase focuses on how elected politicians
+move enacted government policy (`Pge`). Each
+politician exerts force on `Pge` in proportion to
+their `political_power` — a scalar weight derived
+from institutional and electoral factors. The
+direction of force comes from the relative position
+of `Pge` and the politician's true innate policy
+positions. Distance of separation has no effect on
+force magnitude.
 
-Each govern step, enacted policy (`Pge`) shifts under the net
-force exerted by all elected politicians. Each politician has
-two policy positions — innate (what they actually believe) and
-external (what they promised voters). These pull in potentially
-different directions, and the balance between them determines
-what actually happens during governance.
+#### 7.5.1 Political Power
 
-**Effective governing target per politician:**
+Each elected politician's `political_power` is a
+scalar computed from three components:
 
-The politician's existing `pander` parameter controls how much
-they govern according to their promises vs. their ideology:
+**Component 1 — Zone population**: Politicians
+representing larger zones (more citizens) carry more
+institutional weight. A state-level politician has
+more power than a district-level one; a country-level
+politician has more than a state-level one. The zone
+population is `zone.curr_num_citizens`.
+
+**Component 2 — Margin of victory**: A politician who
+won by a large margin has a stronger mandate than one
+who barely won. The margin is the difference between
+the winner's vote count and the next-closest rival's
+vote count, normalized by the total votes cast in
+the zone.
+
+**Component 3 — Agreement/disagreement ratio**: The
+ratio of citizen-average agreement integrals to
+citizen-average disagreement integrals, using zone
+citizen averages and the politician's external
+(apparent) positions:
 
 ```
-target_mu = pander * ext_policy_pref.mu
-          + (1 - pander) * innate_policy_pref.mu
-
-target_sigma = pander * ext_policy_pref.sigma
-             + (1 - pander) * innate_policy_pref.sigma
+agreement = I(avg_Pcp, Ppp) + I(avg_Pca, Ppa)
+          + I(avg_Tcp, Tpx)
+disagreement = I(avg_Pca, Ppp) + I(avg_Pcp, Ppa)
 ```
 
-When innate and external positions are close (an honest
-politician), the distinction is moot. When they differ (a
-liar), `pander` controls whether the lie carries through into
-governance or was purely electoral.
+A politician whose apparent positions align well with
+citizen preferences (high agreement) and poorly with
+citizen aversions (low disagreement) has more
+political power. Because this uses external
+positions, a politician who lied effectively during
+the campaign may have inflated agreement ratios
+relative to their true innate positions.
 
-**Force on enacted policy:**
+**Combining the components**: A candidate formulation:
+
+```
+political_power = zone_population
+                * margin_of_victory
+                * (agreement
+                   / (|disagreement| + eps))
+```
+
+The `eps` prevents division by zero. The product form
+means each component scales the others
+multiplicatively.
+
+**Future extensions**: The political power computation
+may later incorporate:
+- An incumbency factor.
+- Change-desire integrals: `I(avg_Pca, Pge)` added
+  to the agreement numerator and `I(avg_Pcp, Pge)`
+  added to the disagreement denominator, capturing
+  the degree to which citizens want policy to move
+  away from the status quo.
+
+#### 7.5.2 Per-Dimension Allocation
+
+Political power is a scalar, but politicians do not
+exert equal force on every policy dimension. Each
+politician's power is distributed across dimensions
+according to how strongly they hold positions on each
+dimension, as measured by the inverse of their innate
+Gaussian sigma.
+
+**For preference-driven forces** (attraction toward
+innate preference):
+
+```
+raw_pref_n = 1 / sigma_innate_pref_n
+pref_weight_n = raw_pref_n / sum(raw_pref_n)
+```
+
+**For aversion-driven forces** (repulsion away from
+innate aversion):
+
+```
+raw_aver_n = 1 / sigma_innate_aver_n
+aver_weight_n = raw_aver_n / sum(raw_aver_n)
+```
+
+A narrow sigma (strong, focused opinion) allocates
+more of the politician's power to that dimension.
+A broad sigma (weak, diffuse opinion) allocates less.
+The normalization ensures each set of weights sums
+to 1 across all policy dimensions.
+
+#### 7.5.3 Policy Movement
+
+Each govern step, enacted policy (`Pge`) shifts under
+the forces exerted by all elected politicians. Each
+politician contributes two types of force:
+
+**Preference attraction**: Pulls `Pge` toward the
+politician's innate policy preference position.
 
 ```
 for each policy dimension n:
-    force_mu = 0
-    force_sigma = 0
+    pref_force_mu_n = 0
+    pref_force_sigma_n = 0
 
-    for each elected politician:
-        target = effective_target(politician)
-        w = political_capital(politician, n)
-        force_mu += w * influence * (target.mu - Pge.mu)
-        force_sigma += w * influence * (target.sigma
-                                        - Pge.sigma)
+    for each elected politician p:
+        w = political_power_p * pref_weight_p_n
+        dir_mu = sign(innate_pref_p.mu_n
+                      - Pge.mu_n)
+        dir_sigma = sign(innate_pref_p.sigma_n
+                         - Pge.sigma_n)
+        pref_force_mu_n += w * dir_mu
+        pref_force_sigma_n += w * dir_sigma
 
-    Pge.mu += governance_rate * force_mu
-    Pge.sigma += governance_rate * force_sigma
+    Pge.mu_n += pref_force_mu_n
+    Pge.sigma_n += pref_force_sigma_n
 ```
 
-The `policy_influence` parameter (already on each politician)
-scales how effectively they move policy. The
-`governance_rate` provides institutional inertia — policy
-changes gradually regardless of how strong the forces are.
-The `governance_rate` is stored as a variable so that it can
-be made dynamic in the future (e.g., modulated by incumbency,
-supermajority conditions, or crisis).
-
-**Aversion forces**: Politicians also have policy aversions
-(innate and external). These exert a repulsive force — pushing
-`Pge` *away* from the politician's aversion positions, using
-the same influence, political capital, and rate scaling. A
-politician can shape policy both by what they want and by what
-they actively oppose.
-
-#### 7.5.2 Political Capital
-
-Politicians cannot affect all policies equally. Each
-politician has a finite amount of political capital that must
-be distributed across policy dimensions. The distribution is
-determined by the politician's own Gaussian parameters:
-
-- **Narrow sigma dimensions get more capital**: A politician
-  with a narrow (sharp) innate preference on a policy
-  dimension has strong attachment to a specific position on
-  that issue. They will focus their capital there.
-- **Strong aversion dimensions get more capital**: If the
-  enacted policy overlaps strongly with a politician's
-  aversion on some dimension, that dimension is urgent — the
-  politician spends capital to push policy away from what
-  they oppose.
-
-A candidate formulation for the capital weight on dimension n:
+**Aversion repulsion**: Pushes `Pge` away from the
+politician's innate policy aversion position.
 
 ```
-raw_n = 1/sigma_innate_n + |overlap(Ppa_n, Pge_n)|
-capital_n = raw_n / sum(raw_n for all dimensions)
+for each policy dimension n:
+    aver_force_mu_n = 0
+    aver_force_sigma_n = 0
+
+    for each elected politician p:
+        w = political_power_p * aver_weight_p_n
+        dir_mu = sign(Pge.mu_n
+                      - innate_aver_p.mu_n)
+        dir_sigma = sign(Pge.sigma_n
+                         - innate_aver_p.sigma_n)
+        aver_force_mu_n += w * dir_mu
+        aver_force_sigma_n += w * dir_sigma
+
+    Pge.mu_n += aver_force_mu_n
+    Pge.sigma_n += aver_force_sigma_n
 ```
 
-The first term gives more weight to narrow (strongly held)
-positions. The second term gives more weight to dimensions
-where enacted policy currently aligns with the politician's
-aversion — urgent problems demand attention. The
-normalization ensures capital sums to 1 across all dimensions,
-so a politician who focuses heavily on one policy necessarily
-has less influence on others.
+The `sign()` function returns +1, 0, or -1. Only the
+direction matters — the distance between `Pge` and
+the politician's position does not scale the force.
+Politicians push both `Pge.mu` (position) and
+`Pge.sigma` (specificity) toward their innate values,
+so they shape both where policy sits and how sharply
+defined it is.
 
-This creates emergent strategic behavior without modeling
-strategy explicitly: a politician with broadly held positions
-spreads their capital thin and moves each dimension only
-slightly, while a politician with one sharp preference and
-one urgent aversion concentrates force on those dimensions.
+**Future extension — governance rate**: A global
+`governance_rate` parameter may be introduced to
+provide institutional inertia, bounding how fast
+`Pge` can move per step regardless of force
+magnitude. For now, the simulation runs without this
+parameter to observe the natural dynamics of
+political power weighting alone.
 
-#### 7.5.3 Zone Population Weighting
+**Future extension — position blending**: A per-
+politician parameter may be introduced to blend
+innate and external positions when computing the
+governing target. This would allow politicians to
+govern partly according to their campaign promises
+rather than purely from ideology. The blending
+concept is deferred until the basic mechanics are
+validated.
 
-Not all elected politicians carry equal institutional weight.
-A politician elected from a large zone (many citizens)
-represents more constituents and should have proportionally
-more ability to effect change than one from a small zone.
-The population of the zone affects the relative weight of
-each politician's force contribution.
+#### 7.5.4 Natural Policy Spread
 
-#### 7.5.4 Downstream Effects
+Enacted policy Gaussians naturally broaden over time,
+representing the tendency of policy specificity to
+erode without active political effort to maintain it.
+The broadening is faster for sharp (narrow sigma)
+policies and slower for broad ones:
 
-Once `Pge` shifts, existing mechanisms produce feedback:
+```
+Pge.sigma_n += spread_rate / Pge.sigma_n
+```
 
-1. `overlap(Pci, Pge)` changes — citizen well-being changes.
-2. `overlap(Pcp, Pge)` changes — perceived satisfaction
+A narrow `Pge` (small sigma) spreads quickly —
+precise policy details are hard to maintain. A broad
+`Pge` (large sigma) spreads slowly — vague policy is
+already diffuse. This is analogous to the natural
+tendency of citizen engagement to decay toward apathy
+(§8.2), but applied to the specificity of enacted
+policy rather than to agent orientation.
+
+The natural spread is applied once per govern cycle
+(not per govern step), using a small `spread_rate`
+parameter. The `spread_rate` is stored as a variable
+so it can be made dynamic in the future.
+
+The spread creates a natural tension: politicians
+must continuously exert force to keep enacted policy
+sharp and aligned with their positions. Without
+sustained political effort, policy drifts toward
+vagueness.
+
+#### 7.5.5 Downstream Effects
+
+Once `Pge` shifts, existing mechanisms produce
+feedback:
+
+1. `overlap(Pci, Pge)` changes — citizen well-being
    changes.
+2. `overlap(Pcp, Pge)` changes — perceived
+   satisfaction changes.
 3. Well-being feeds into engagement (via
    `build_response_to_well_being()`).
 4. Engagement affects vote probability.
 5. Vote probability affects who wins next cycle.
 
-A governing phase that drifts policy away from citizens'
-ideal positions will erode well-being, change voting
-behavior, change who gets elected, and change the forces on
-policy. The feedback loop closes naturally.
+A governing phase that drifts policy away from
+citizens' ideal positions will erode well-being,
+change voting behavior, change who gets elected, and
+change the forces on policy. The feedback loop closes
+naturally.
 
-#### 7.5.5 Emergent Behaviors
+#### 7.5.6 Emergent Behaviors
 
-The force model produces several interesting dynamics without
-special-casing them:
+The political power model produces several dynamics
+without special-casing them:
 
-- **Gridlock**: When elected politicians pull in opposing
-  directions, forces partially cancel and policy moves slowly
-  or not at all.
-- **Rapid change**: When politicians align, forces reinforce
-  and policy moves quickly (still bounded by
-  `governance_rate`).
-- **Broken promises**: A low-pander politician governs based
-  on ideology, not promises. Citizens experience the
-  consequences through well-being and eventually vote
-  differently.
+- **Gridlock**: When elected politicians pull in
+  opposing directions, forces partially cancel and
+  policy moves slowly or not at all.
+- **Rapid change**: When politicians align, forces
+  reinforce and policy moves quickly.
+- **Mandate effects**: A politician who won by a
+  large margin with high citizen agreement exerts
+  substantially more force than one who barely won
+  with mixed support.
+- **Hierarchical power**: Higher-zone politicians
+  (state, country) naturally dominate lower-zone
+  ones (district) through the population component.
+- **Policy erosion**: Without sustained political
+  effort, enacted policy naturally broadens and
+  loses specificity via the natural spread
+  mechanism (§7.5.4).
 - **Focused politicians**: Narrow-sigma politicians
-  concentrate capital on a few dimensions and move those
-  effectively. Broad-sigma politicians spread thin and change
-  little.
-- **Reactive governance**: High aversion overlap with enacted
-  policy redirects capital toward urgent dimensions, creating
-  a natural prioritization mechanism.
+  concentrate their power on a few dimensions and
+  move those effectively. Broad-sigma politicians
+  spread thin and change little.
 
 ---
 
@@ -653,9 +808,8 @@ special-casing them:
 
 ### 8.1 Fundamental Principle: Trait Gates Policy
 
-A consistent rule governs how citizens' policy positions
-shift in response to any influence source (politician or
-citizen collective):
+**Politician influence** on citizen policy positions is
+sign-gated by trait alignment:
 
 - The **magnitude** of trait alignment (|trait_sum|)
   determines how much the policy shift is.
@@ -663,33 +817,41 @@ citizen collective):
   shift occurs.
 
 ```
-trait_sum = sum of trait overlap integrals with the source
+trait_sum = sum of trait overlap integrals with politician
 magnitude = |trait_sum|   --> amount of shift
 sign      = sign(trait_sum)  --> type of shift
 ```
 
-**Positive trait overlap** (citizen likes the source):
+**Positive trait overlap** (citizen likes the politician):
 
-- Policy mu shifts toward the source's mu, proportional
+- Policy mu shifts toward the politician's mu, proportional
   to magnitude.
-- Policy sigma shifts toward the source's sigma,
+- Policy sigma shifts toward the politician's sigma,
   proportional to magnitude.
 
-**Negative trait overlap** (citizen dislikes the source):
+**Negative trait overlap** (citizen dislikes the politician):
 
 - No preference mu movement.
 - Preference sigma narrows (citizen becomes more rigid),
   proportional to magnitude.
-- Aversion mu shifts toward the source's policy positions
+- Aversion mu shifts toward the politician's policy positions
   (targeted backlash), proportional to magnitude times
   a `defensive_ratio` parameter.
 
-Physical interpretation: People who feel personality affinity
-with an influence source are susceptible to adopting that
-source's policy positions. People who feel personality aversion
-become defensive, dig in on their preferences, and develop
-targeted aversions to the disliked source's specific
-policies.
+**Citizen-collective influence** is unconditional: policy
+and trait Gaussians always drift toward zone averages
+regardless of trait alignment. There is no defensive
+backlash against the community. The drift rate uses only
+same-type overlaps (pref x pref, aver x aver); cross terms
+are excluded. See §8.6.3 for the full formulas.
+
+Physical interpretation: Personality affinity with a
+politician makes a citizen open to adopting that politician's
+positions; personality aversion triggers defensive rigidity
+and targeted backlash. Community norms exert a background
+pull with no analogous backlash — people absorb community
+norms gradually, including norms they are opposed to, just
+more slowly.
 
 For the detailed shift formulas, see §8.6.3. For
 engagement effects, see §8.6.2.
@@ -707,12 +869,14 @@ you engage in support.
 
 **Engagement decay**: Every simulation step, every citizen's
 theta for every Gaussian drifts toward pi/2 (fully imaginary /
-fully apathetic) by a constant `engagement_decay_rate`. Without
-active campaigning or citizen-citizen interaction, citizens
-gradually disengage from all issues. This creates a fundamental
-tension: campaigns must actively maintain engagement, not just
-create it once. The decay rate is stored as a variable
-for future dynamic behavior.
+fully apathetic) proportionally to theta itself:
+`theta *= (1 + engagement_decay_rate)`. The more disengaged a
+citizen already is, the faster they drift toward full apathy —
+disengagement is self-reinforcing. A perfectly engaged citizen
+(theta=0) experiences no decay. Without active campaigning or
+citizen-citizen interaction, citizens gradually disengage from
+all issues. The rate is stored as a variable for future dynamic
+behavior.
 
 For the precise decay formula, see §8.6.6. For the
 new parameter, see §8.6.8.
@@ -733,8 +897,9 @@ citizen Gaussian's theta toward real:
 |I(Tca,Tpx)| --> shifts Tca theta toward real
 ```
 
-The politician's `policy_influence` and `trait_influence`
-parameters scale these shifts.
+The politician's `policy_persuasion` (f_pol) and
+`trait_persuasion` (f_trait) parameters scale these
+shifts.
 
 **Policy position and spread shifts**: Follow the "trait
 gates policy" principle (Section 8.1). The trait sum between
@@ -841,12 +1006,12 @@ implementation, the following decisions are needed:
    should it affect (policy_trait_ratio, aversion
    intensity, trait shifts)?
 
-4. **Implementation order**: Should the simple
-   overlap-based well-being (`overlap(Pci, Pge)`) be
-   kept as a first step with downstream effects on
-   engagement, deferring the richer model? Or should
-   the full model be designed before implementing any
-   downstream effects? (See also §6.1 and TODO #9.)
+4. **Implementation order**: ✅ **Decided**: Implement
+   the simple `overlap(Pci, Pge)` well-being first with
+   downstream engagement effects. Encapsulate the
+   well-being→engagement mapping so the richer model
+   can slot in without restructuring call sites.
+   (See §6.1 and TODO #9.)
 
 ### 8.6 Influence Application
 
@@ -890,8 +1055,8 @@ citizen Gaussian it involves. All contributions are
 non-negative — both agreement and disagreement drive
 engagement.
 
-From each politician p (f_pol = policy_influence,
-f_trait = trait_influence):
+From each politician p (f_pol = policy_persuasion,
+f_trait = trait_persuasion):
 
 ```
 Pcp.theta_shift[n] += f_pol * (|I(Pcp,Ppp)[n]|
@@ -902,7 +1067,8 @@ Tcp.theta_shift[m] += f_trait * |I(Tcp,Tpx)[m]|
 Tca.theta_shift[m] += f_trait * |I(Tca,Tpx)[m]|
 ```
 
-From zone averages (no external scaling factor):
+From zone averages (scaled by `collective_influence_rate`
+from the XML; no per-politician factor like f_pol/f_trait):
 
 ```
 Pcp.theta_shift[n] += |I(Pcp,avg_Pcp)[n]|
@@ -941,17 +1107,22 @@ the Gaussian being shifted:
   about the issue and resists movement. Susceptibility
   increases with theta.
 
-A candidate susceptibility function:
+The susceptibility function (c=1 settled, see §8.6.8):
 
 ```
-S(sigma, theta) = sigma * (1 - c * cos(theta))
+S(sigma, theta) = sigma * (1 - cos(theta))
 ```
 
-At full engagement (theta=0): S = sigma * (1-c) — reduced
-but nonzero (even an engaged citizen can be influenced).
+At full engagement (theta=0): S = 0 — fully engaged
+citizens are completely immovable; no mu or sigma shifts
+occur regardless of influence magnitude.
 At full apathy (theta=pi/2): S = sigma — maximum
-susceptibility. The parameter c (0 < c < 1) controls how
-much engagement protects against position shifts.
+susceptibility.
+Near theta=0: S ≈ sigma * theta²/2 — susceptibility
+grows slowly (quadratically) from zero, so positions
+only shift meaningfully once disengagement is substantial.
+This means campaigns primarily alter engagement levels;
+position shifts follow only as citizens disengage.
 
 **Shift direction**: The direction of movement is toward
 the source, independent of distance:
@@ -967,7 +1138,7 @@ Compute the trait sum across all trait dimensions:
 ```
 trait_sum = sum_m( I(Tcp,Tpx)[m] + I(Tca,Tpx)[m] )
 mag       = |trait_sum|
-f         = policy_influence
+f         = policy_persuasion
 ```
 
 If trait_sum >= 0 (citizen likes politician):
@@ -1007,108 +1178,80 @@ what the disliked politician stands *for*.
 
 **From zone averages (citizen collective):**
 
-Compute the trait sum using all four citizen-citizen trait
-integrals (the citizen collective has separate pref and aver
-Gaussians, unlike a politician's single trait Gaussian):
+Community policy influence is unconditional: policy
+Gaussians always drift toward zone average policy values
+regardless of trait alignment. There is no defensive
+response. The rate uses only same-type trait overlaps;
+cross terms are excluded:
 
 ```
-trait_sum = sum_m( I(Tcp,avg_Tcp)[m]
-                 + I(Tca,avg_Tca)[m]
-                 + I(Tcp,avg_Tca)[m]
-                 + I(Tca,avg_Tcp)[m] )
-mag       = |trait_sum|
+trait_rate = sum_m( I(Tcp,avg_Tcp)[m]
+                  + I(Tca,avg_Tca)[m] )
 ```
 
-If trait_sum >= 0: policy pref and aver mu and sigma shift
-toward the zone average policy values. Same formulas as the
-politician case with f = 1, zone averages replacing
-politician Gaussians, and susceptibility S applied to the
-citizen Gaussian being shifted.
+trait_rate is always ≥ 0. Policy pref and aver mu and
+sigma always shift toward the zone average policy values.
+Same formulas as the politician positive-trait case with
+f = 1, zone averages replacing politician Gaussians, and
+susceptibility S applied to the citizen Gaussian being
+shifted.
 
-If trait_sum < 0: same defensive response — pref sigma
-narrows toward sigma_floor, aver mu shifts toward zone
-average policy pref positions (scaled by
-mag * defensive_ratio), all modulated by susceptibility.
+**Decision**: The susceptibility model is the chosen
+approach. The force/momentum alternative is back-burnered
+(see note below).
 
-**Candidate alternative — force/momentum dynamics:**
-
-The susceptibility model above is memoryless: each step's
-shift depends only on the current state. A richer
-alternative introduces Newtonian dynamics where influence
-produces a *force* rather than a direct shift:
-
-```
-mass[n]         = f(1/sigma[n], cos(theta[n]))
-force[n]        = mag * influence * direction[n]
-acceleration[n] = force[n] / mass[n]
-velocity[n]    += acceleration[n]
-mu[n]          += velocity[n]
-velocity[n]    *= (1 - damping)
-```
-
-Mass depends inversely on sigma and proportionally on
-cos(theta): narrow + engaged = heavy = hard to accelerate.
-This naturally captures both susceptibility factors.
-Momentum means past influences have lingering effects — a
-citizen pushed in one direction for several steps continues
-drifting even after the influence stops. Damping prevents
-runaway velocity.
-
-Trade-offs: The dynamics model adds a velocity state
-variable per Gaussian per dimension, plus mass and damping
-parameters. It produces smoother, more physically motivated
-trajectories but is more complex to tune. The overlap
-integrals already encode some distance sensitivity (far-apart
-Gaussians have weaker overlap), so the force model layers on
-top of that existing physics.
-
-⚠️ **DESIGN QUESTION (Shift Model)**: Either the
-susceptibility model or the force/momentum model could
-be implemented first. The susceptibility model is
-simpler (no additional state variables) but memoryless.
-The dynamics model adds velocity per Gaussian per
-dimension and produces smoother trajectories with
-inertia. Which model should be implemented first?
-(See also §8.6.9 for related questions, TODO #8 and
-#21 for implementation.)
+*Back-burnered — force/momentum dynamics*: An alternative
+approach introduces Newtonian dynamics where influence
+produces a *force* rather than a direct shift, with
+velocity state per Gaussian per dimension and a damping
+parameter. This produces inertia and lingering effects from
+past influence, but adds complexity and is unappealing at
+this stage. Revisit after the susceptibility model is
+implemented and evaluated. (See §8.6.8 for the parameters
+that would be needed if this is ever revisited.)
 
 #### 8.6.4 Trait Position and Spread Accumulation
 
 Trait acclimatization occurs only through the citizen
 collective (Section 8.4 — politicians do not directly shift
 citizen traits). It is unconditional: trait Gaussians always
-shift toward the zone average, regardless of the sign of
-trait overlap. The magnitude of trait overlap controls only
-the rate.
+shift toward the zone average, regardless of trait alignment.
+The rate uses only same-type trait overlaps (pref x pref,
+aver x aver); cross terms are excluded. This is the same
+trait_rate computed in §8.6.3 for the citizen-collective
+policy case.
 
 The same susceptibility considerations from Section 8.6.3
 apply: narrow, engaged trait Gaussians resist movement more
 than broad, disengaged ones.
 
 ```
+trait_rate = sum_m( I(Tcp,avg_Tcp)[m]
+                  + I(Tca,avg_Tca)[m] )
+
 for each trait dim m:
-    Tcp.mu_shift[m]    += |trait_sum|
+    Tcp.mu_shift[m]    += trait_rate
         * S(Tcp.sigma[m], Tcp.theta[m])
         * sign(avg_Tcp.mu[m] - Tcp.mu[m])
-    Tcp.sigma_shift[m] += |trait_sum|
+    Tcp.sigma_shift[m] += trait_rate
         * S(Tcp.sigma[m], Tcp.theta[m])
         * sign(avg_Tcp.sigma[m] - Tcp.sigma[m])
-    Tca.mu_shift[m]    += |trait_sum|
+    Tca.mu_shift[m]    += trait_rate
         * S(Tca.sigma[m], Tca.theta[m])
         * sign(avg_Tca.mu[m] - Tca.mu[m])
-    Tca.sigma_shift[m] += |trait_sum|
+    Tca.sigma_shift[m] += trait_rate
         * S(Tca.sigma[m], Tca.theta[m])
         * sign(avg_Tca.sigma[m] - Tca.sigma[m])
 ```
 
-Here trait_sum is the same citizen-collective trait sum
-computed in Section 8.6.3. Even a citizen with negative
-trait overlap slowly drifts toward community trait norms;
-they simply drift more slowly than a citizen who fits in.
+trait_rate is always ≥ 0. A citizen whose traits are
+opposed to community norms still drifts toward those norms;
+trait_rate simply becomes small when same-type alignment
+is weak.
 
-If the force/momentum model (Section 8.6.3) is adopted,
-trait shifts would use the same dynamics framework with
-per-trait-dimension velocities and mass.
+*Back-burnered*: If the force/momentum model is ever
+revisited, trait shifts would use the same dynamics
+framework with per-trait-dimension velocities and mass.
 
 #### 8.6.5 Application Step
 
@@ -1146,18 +1289,30 @@ applied before clamping (Section 8.6.6).
 
 #### 8.6.6 Engagement Decay
 
-After influence-driven engagement shifts, a constant decay
-pulls every citizen's theta for every stated Gaussian toward
-pi/2 (full apathy):
+After influence-driven engagement shifts, a proportional
+decay pulls every citizen's theta for every stated Gaussian
+toward pi/2 (full apathy):
 
 ```
-theta = clamp(theta + engagement_decay_rate, 0, pi/2)
+theta = clamp(theta * (1 + engagement_decay_rate), 0, pi/2)
 ```
 
-engagement_decay_rate is a positive simulation parameter.
-Without active influence, citizens disengage from all issues
-over time. The rate is stored as a variable for future
-dynamic behavior (e.g., modulated by well-being or crisis).
+`engagement_decay_rate` is a small positive dimensionless
+constant (the fractional increase in theta per step).
+
+Key properties of this formulation:
+- **No decay at full engagement**: when theta = 0, the
+  decay term is zero — a perfectly engaged citizen stays
+  engaged unless actively disturbed.
+- **Self-reinforcing**: the higher theta (the more
+  disengaged), the larger the absolute decay step. Once
+  disengagement begins, it accelerates.
+- **Maximum decay near apathy**: the decay is largest
+  when theta is near pi/2, producing the strongest pull
+  toward full apathy.
+
+The rate is stored as a variable for future dynamic
+behavior (e.g., modulated by well-being or crisis).
 
 #### 8.6.7 Post-Application Update
 
@@ -1177,84 +1332,68 @@ XML configuration:
 
 | Parameter | Purpose | Initial |
 |---|---|---|
-| `engagement_decay_rate` | Per-step theta drift toward pi/2 | TBD |
+| `engagement_decay_rate` | Fractional per-step theta increase (proportional decay: theta *= (1 + rate)) | TBD |
 | `defensive_ratio` | Scales targeted backlash mu shift | 1.0 |
-| `sigma_floor` | Minimum sigma for all Gaussians | TBD |
-| `engagement_protection` | c in S(); how much engagement resists shifts | TBD |
+| `sigma_floor` | Minimum sigma for all Gaussians; also the target of defensive narrowing | 0.05 (~20× narrower than a typical initial sigma of O(1)) |
+| `engagement_protection` | c in S() = sigma*(1 - c*cos(theta)); c=1 makes fully engaged citizens completely immovable | 1.0 |
 
-If the force/momentum model is adopted, additional
-parameters would be needed:
-
-| Parameter | Purpose | Initial |
-|---|---|---|
-| `damping` | Velocity decay per step (0 = no friction, 1 = no momentum) | TBD |
-
-The mass function f(1/sigma, cos(theta)) would also need
-a specific functional form and possibly scaling parameters.
+*Back-burnered — force/momentum parameters*: If the
+dynamics model is ever revisited, additional parameters
+would be needed: `damping` (velocity decay per step) and
+a mass function f(1/sigma, cos(theta)) with its own
+scaling parameters.
 
 #### 8.6.9 Open Design Questions
 
 The following questions must be resolved before the
 shift mechanics can be fully implemented (TODO #8,
-#21). The susceptibility vs. dynamics question (Q1)
-is the most fundamental — it determines the overall
-shift architecture. The remaining questions are
-refinements that can be resolved during or after
-initial implementation.
+#21). The shift model choice (Q1) is settled; the
+remaining questions are refinements that can be
+resolved during or after initial implementation.
 
-⚠️ **DESIGN QUESTION (Q1 — Shift model choice)**:
-Susceptibility model (§8.6.3) vs. force/momentum
-model (§8.6.3)? The susceptibility model is
-memoryless and simpler; the dynamics model adds
-velocity state and inertia. See §8.6.3 for the full
-description of both.
+✅ **Q1 — Shift model choice**: The susceptibility
+model is chosen. Force/momentum dynamics are
+back-burnered (see §8.6.3).
 
-⚠️ **DESIGN QUESTION (Q2 — Susceptibility function
-form)**: If the susceptibility model is chosen, which
-formula for S(sigma, theta)?
-- `S = sigma * (1 - c * cos(theta))` — nonzero at
-  full engagement (controlled by c)
-- `S = sigma * sin(theta)` — zero at full engagement
-  (fully engaged citizens are immovable)
-- Product of separate sigma/theta terms with
-  different functional forms
+✅ **Q2 — Susceptibility function form**:
+`S(sigma, theta) = sigma * (1 - cos(theta))` with c=1.
+Fully engaged citizens (theta=0) are completely
+immovable. See §8.6.3 for full description.
 
-The choice depends on whether full engagement should
-make a citizen nearly immovable or merely resistant.
+✅ **Q3 — Defensive narrowing rate**: Susceptibility-
+dependent narrowing is correct. Broad Gaussians
+(undecided citizens) narrow faster than already-narrow
+ones, which aligns with the empirical observation that
+people form firm opinions more quickly than expected.
+Narrowing rate remains coupled to susceptibility.
 
-⚠️ **DESIGN QUESTION (Q3 — Defensive narrowing
-rate)**: The defensive sigma shift uses
-`sign(sigma_floor - sigma)`, giving constant-rate
-narrowing. With susceptibility, broader Gaussians
-narrow faster (they are more susceptible). Does this
-produce the right behavior, or should the narrowing
-rate be independent of susceptibility?
+✅ **Q4 — Citizen-collective scaling**: A
+`collective_influence_rate` parameter is added to
+independently scale community influence relative to
+politician influence. Default value is 1.0 (no
+change to current behavior). Configured in the
+`<citizens>` XML block.
 
-⚠️ **DESIGN QUESTION (Q4 — Citizen-collective
-scaling)**: Politician influence is scaled by
-`policy_influence` / `trait_influence`. Zone average
-influence currently has no scaling factor (f = 1).
-Should a `collective_influence_rate` parameter be
-added for tuning community vs. politician influence
-strength?
+✅ **Q5 — Trait self-gating rate**: Rate is determined
+by same-type overlaps only: `trait_rate =
+I(Tcp,avg_Tcp) + I(Tca,avg_Tca)`. Cross terms are
+excluded and do not affect acclimatization speed.
+trait_rate is always ≥ 0, eliminating cancellation.
+Citizen-collective policy influence is also
+unconditional (always attract, same-type rate),
+parallel to trait acclimatization. The full
+trait_sum (all four terms, signed) is used for
+sign-gating in politician influence only.
 
-⚠️ **DESIGN QUESTION (Q5 — Trait self-gating
-rate)**: Trait acclimatization uses |trait_sum| (net
-magnitude). If positive and negative overlaps
-partially cancel, the net could be small even when
-individual overlaps are large. Alternative:
-`sum(|individual overlaps|)`, where any interaction
-accelerates drift. The |net sum| form is used for
-policy-case consistency, but the behavioral
-difference is significant.
-
-⚠️ **DESIGN QUESTION (Q6 — Sigma shift direction)**:
-Current formulas use `sign(source_sigma -
-citizen_sigma)` for constant-magnitude steps. An
-alternative makes shift magnitude depend on the
-spread difference (hybrid between sign-only and full
-proportional). Same directional question as for mu
-shifts, applied to sigma.
+✅ **Q6 — Sigma shift direction**: Keep
+`sign(source_sigma - citizen_sigma)` for
+constant-magnitude steps. Spring-like behavior
+(shift proportional to distance) is explicitly
+rejected. The anti-spring character already present
+in `S = sigma_citizen * (1 - cos(theta))` is
+sufficient: broader citizens take larger steps and
+naturally decelerate as they narrow toward the
+source.
 
 ---
 
@@ -1359,7 +1498,6 @@ sections:
 | `num_cycles` | Number of campaign-vote-govern cycles |
 | `num_campaign_steps` | Time steps per campaign phase |
 | `num_govern_steps` | Time steps per govern phase |
-| `num_primary_campaign_steps` | Time steps per primary (unimplemented) |
 | `data_resolution` | Data points per real number for output |
 | `data_neglig` | Negligibility threshold for data range |
 
@@ -1383,7 +1521,7 @@ ideal policy, trait pref, trait aver. Also
 ### politicians
 
 Standard deviations for initializing politician Gaussians.
-Also: influence, lie, and pander standard deviations, and
+Also: persuasion and lie standard deviations, and
 cumulative strategy probability distributions for move,
 adapt, and campaign strategies.
 

@@ -26,21 +26,26 @@ class Gaussian():
     def update_integration_variables(self):
         self.alpha = 0.5 / self.sigma**2
         self.cos_theta = np.cos(self.theta.imag)
+        # Normalization constant: sqrt(I(G,G)) = (pi*sigma^2)^0.75 * |cos_theta|
+        # Cached here so integral() pays only 1 mul + 1 div per call.
+        self.self_norm = (np.pi * self.sigma**2)**0.75 \
+                         * np.abs(self.cos_theta)
 
 
     def integral(self, g):
-        # Get the real parts of the integral of the product of the self and
-        #   g (given) Gaussians.
-        #   I(G1,G2) = Integral(Re(G1)*Re(G2) dx; -infinity..+infinity)
-        #   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2)
-        #              * cos(theta_1) * cos(theta_2)
+        # Normalized overlap integral, bounded to [-1, +1].
+        #   I_norm(G1,G2) = I_raw(G1,G2) / sqrt(I(G1,G1) * I(G2,G2))
+        #   I_raw(G1,G2)  = (pi/zeta)^1.5 * exp(-xi * d^2)
+        #                   * cos(theta_1) * cos(theta_2)
+        # Returns 0 when either Gaussian is fully apathetic (cos_theta=0).
         one_over_zeta = 1.0 / (self.alpha + g.alpha)
         xi = 0.5 * one_over_zeta
         dist = self.mu - g.mu
         exp = np.exp(-xi * dist**2)
-        intg = (np.pi * one_over_zeta)**1.5 * exp \
-                * self.cos_theta * g.cos_theta
-        return intg
+        raw = (np.pi * one_over_zeta)**1.5 * exp \
+              * self.cos_theta * g.cos_theta
+        norm = self.self_norm * g.self_norm
+        return np.where(norm > 0.0, raw / norm, 0.0)
 
 
     def accumulate(self, gaussian):

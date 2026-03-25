@@ -424,19 +424,15 @@
 #   zone average trait Gaussians determines how much their policy
 #   positions shift toward the zone average policy positions.
 #
-#   If the citizen has positive trait overlap with the community:
-#     - Policy preference and aversion mu shift toward zone average mu.
-#     - Policy preference and aversion sigma shift toward zone average
-#       sigma.
-#     The citizen "fits in" personality-wise and is more susceptible to
-#       adopting community policy views.
-#
-#   If the citizen has negative trait overlap with the community:
-#     - No policy preference mu movement.
-#     - Policy preference sigma narrows (citizen becomes more rigid).
-#     - Policy aversion mu shifts toward the community's policy
-#       positions (targeted backlash, scaled by defensive_ratio).
-#     The citizen feels alienated and becomes more rigid.
+#   This shift is UNCONDITIONAL — there is no sign-gating and no
+#     defensive branch for community influence (DESIGN.md §8.6.3).
+#     The rate is governed by trait_rate = sum of same-type trait
+#     overlaps (pref×pref + aver×aver; cross-terms excluded), which
+#     is always >= 0.  Policy preference and aversion mu and sigma
+#     always drift toward the zone averages, regardless of whether
+#     the citizen's traits align with community norms. A citizen who
+#     is trait-opposed to the community still absorbs community
+#     norms, just more slowly (smaller trait_rate).
 #
 # --- Citizen-driven citizen trait shifts and spreads ---
 #
@@ -664,6 +660,32 @@ def campaign(sim_control, settings, world, hdf5):
             citizen.build_response_to_citizen_collective()
         print ("built response to collective")
 
+        # - Apply accumulated shifts to citizen Gaussian
+        #   parameters. This is the second half of the
+        #   two-phase accumulate-then-apply pattern: the
+        #   three build_response_to_*() calls above each
+        #   added their contributions to per-citizen shift
+        #   arrays without touching the Gaussians directly.
+        #   Now, in a single pass, those shifts are written
+        #   into the actual mu, sigma, and theta parameters.
+        #   Doing it this way guarantees that the order of
+        #   the three accumulation calls does not affect the
+        #   outcome — every source saw the same citizen
+        #   state at the top of this step (DESIGN.md §8.6).
+        #   Engagement decay is also applied here, so that
+        #   citizens who were not reached by any politician
+        #   or collective pressure drift back toward apathy.
+        #   Finally, derived variables cached inside each
+        #   Gaussian (alpha, cos_theta, self_norm) are
+        #   refreshed so that the next step's overlap
+        #   integrals use the updated parameters.
+        #   Must be called BEFORE score_candidates() so
+        #   that scoring reflects the citizen's updated
+        #   engagement state for this step.
+        for citizen in world.citizens:
+            citizen.apply_influence_shifts()
+        print ("applied influence shifts")
+
         # - Citizens make a preliminary assessment about who they will vote for.
         for citizen in world.citizens:
             citizen.score_candidates(world)
@@ -705,15 +727,6 @@ def vote(sim_control, world):
             #   knows the elected politician. This call will do both.
             zone.set_elected_politician(top_vote_getter)
 
-    # The participation probability will be high when there is strong
-    #   personality alignment between the citizen and any candidate.
-    # When personality alignment to all candidates is weak, then the
-    #   participation probability will be low.
-    #poor when there is strong misalignment
-    #   between the citizen policy positions and the current g
-    # Each citizen considers each politician at each zone level and
-    #   computes a probability that the citizen will vote for that
-    #   politician.
     return
 
 
@@ -759,10 +772,6 @@ def main():
         vote(sim_control, world)
 
         govern(sim_control, world)
-
-        #primary(sim_control, world)
-
-        #primary_vote(sim_control, world)
 
 
     # Finalize the program activities and quit.

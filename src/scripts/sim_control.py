@@ -17,8 +17,6 @@ class SimControl():
     num_cycles = 0  # The number of campaign cycles.
     num_campaign_steps = 0  # Number of time steps in a campaign.
     num_govern_steps = 0  # Number of time steps to govern.
-    # Number of time steps in a primary campaign.
-    num_primary_campaign_steps = 0
     total_num_steps = 0  # Total number of simulation steps.
     data_resolution = 1 # data points per real number
     data_neglig = 0.01 # negligability limit for determining min/max data range
@@ -32,9 +30,6 @@ class SimControl():
                 settings.infile_dict[1]["sim_control"]["num_campaign_steps"])
         SimControl.num_govern_steps = int(
                 settings.infile_dict[1]["sim_control"]["num_govern_steps"])
-        SimControl.num_primary_campaign_steps = int(
-                settings.infile_dict[1]["sim_control"]
-                ["num_primary_campaign_steps"])
 
         # Get the resolution and negligabilty limit of the data that may be
         #   output.
@@ -44,9 +39,9 @@ class SimControl():
                 float(settings.infile_dict[1]["sim_control"]["data_neglig"])
 
         # Compute the total number of simulation steps.
-        SimControl.total_num_steps = (SimControl.num_campaign_steps + \
-                SimControl.num_govern_steps + \
-                SimControl.num_primary_campaign_steps) * \
+        SimControl.total_num_steps = \
+                (SimControl.num_campaign_steps + \
+                SimControl.num_govern_steps) * \
                 SimControl.num_cycles
 
 

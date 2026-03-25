@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Read the DESIGN.md file.
+
+This file will present the high level architectural design of the program.
+It will also provide nuanced understanding of specific design decisions.
+It is intended to serve as the main thinking space for program design, but it should be intimately linked to the contents of the TODO.md file (discussed next) so that architecture and design decisions have clear connections to specific and actionionable development tasks.
+
+## Read the TODO.md file.
+
+This file describes detailed action items that are oriented toward specific program code and implementation tasks. The intent is for the action items here are derived from and linked to the effective difference between the DESIGN.md document and the current state of the implementation of the program.
+
 ## Project Overview
 
 STODEM (Stochastic Democracy Simulation) is a multi-agent based simulation modeling democratic processes. Politicians and citizens interact in a hierarchical geographic world divided into nested zones (districts → states → countries). The simulation uses complex Gaussian representations for policy/trait positions.
@@ -59,7 +69,7 @@ The codebase has been refactored from a monolithic `stodem.py` into separate mod
 
 ```
 main() → for each cycle:
-    campaign() → vote() → govern() → (primary phases not yet implemented)
+    campaign() → vote() → govern()
 ```
 
 ### Key Mathematical Concepts
@@ -110,17 +120,14 @@ Key sections:
 ## Known Issues
 
 See `TODO.md` for a comprehensive list. Key items:
-- **Runtime bugs**: All four critical bugs (1-4) resolved
-- `govern()` function is a stub (TODO #5)
-- `build_response_to_politician_influence()` and
-  `build_response_to_citizen_collective()` have
-  accumulation bugs: list extension instead of
-  per-dimension addition, missing politician/zone
-  indexing, missing absolute values (TODO #19, #20)
-- Influence shifts never applied back to citizen
-  Gaussian parameters (TODO #8)
-- `Politician.persuade()` stub, never called (TODO #7)
-- Primary campaign/vote phases not implemented (TODO #12)
-- Several open design questions in `DESIGN.md`
-  (§4.2, §6.1, §8.5, §8.6.9) must be answered before
-  core physics can be fully implemented
+- `govern()` function is a stub (TODO #5, with
+  sub-tasks 5a–5e). Design is complete in §7.5.
+- `build_response_to_well_being()` only computes
+  well-being, no downstream engagement effects
+  (TODO #9)
+- `policy_influence`, `trait_influence`, `pander`
+  are obsolete and should be removed (TODO #31)
+- Primary campaign/vote phases not implemented
+  (TODO #12)
+- Open design questions in `DESIGN.md` §8.5
+  (well-being/resource/resentment model)

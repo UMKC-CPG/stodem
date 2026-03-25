@@ -63,57 +63,91 @@ class Politician():
 
 
     def reset_to_input(self, settings):
-        # Use a uniform initial policy orientation
+        # Theta sign convention mirrors citizens: preference Gaussians
+        #   are positive-valued (Im(theta) in [0, pi/2), cos > 0);
+        #   aversion Gaussians are negative-valued (Im(theta) in
+        #   (pi/2, pi], cos < 0). Traits (innate and external) are
+        #   positive-valued; politicians have no trait aversions.
+        #   Theta is currently hardcoded; the *_orien_stddev XML
+        #   parameters are reserved for a future extension where
+        #   initial Im(theta) is drawn from a configurable
+        #   distribution (see DESIGN.md §4.1 and TODO #29).
         self.innate_policy_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_pref_pos_stddev"]),
-                size=self.num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims),
+                np.abs(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_pref_stddev_stddev"]),
-                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
-                size=self.num_policy_dims), 1)
+                size=self.num_policy_dims)),
+                np.full(self.num_policy_dims, 1j), 1)
         self.innate_policy_aver = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_aver_pos_stddev"]),
-                size=self.num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims),
+                np.abs(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_aver_stddev_stddev"]),
-                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
-                size=self.num_policy_dims), 1)
+                size=self.num_policy_dims)),
+                np.full(self.num_policy_dims, (np.pi - 1) * 1j), 1)
         self.ext_policy_pref = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_pref_pos_stddev"]),
-                size=self.num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims),
+                np.abs(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_pref_stddev_stddev"]),
-                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
-                size=self.num_policy_dims), 1)
+                size=self.num_policy_dims)),
+                np.full(self.num_policy_dims, 1j), 1)
         self.ext_policy_aver = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_aver_pos_stddev"]),
-                size=self.num_policy_dims), rng.normal(loc=0.0,
+                size=self.num_policy_dims),
+                np.abs(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["policy_aver_stddev_stddev"]),
-                size=self.num_policy_dims), rng.uniform(high=2.0*np.pi,
-                size=self.num_policy_dims), 1)
+                size=self.num_policy_dims)),
+                np.full(self.num_policy_dims, (np.pi - 1) * 1j), 1)
 
-        # Use a uniform initial trait orientation
         self.innate_trait = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["trait_innate_pos_stddev"]),
-                size=self.num_trait_dims), rng.normal(loc=0.0,
+                size=self.num_trait_dims),
+                np.abs(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["trait_innate_stddev_stddev"]),
-                size=self.num_trait_dims), rng.uniform(high=2.0*np.pi,
-                size=self.num_trait_dims), 1)
+                size=self.num_trait_dims)),
+                np.full(self.num_trait_dims, 1j), 1)
         self.ext_trait = Gaussian(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["trait_ext_pos_stddev"]),
-                size=self.num_trait_dims), rng.normal(loc=0.0,
+                size=self.num_trait_dims),
+                np.abs(rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
                 ["trait_ext_stddev_stddev"]),
-                size=self.num_trait_dims), rng.uniform(high=2.0*np.pi,
-                size=self.num_trait_dims), 1)
+                size=self.num_trait_dims)),
+                np.full(self.num_trait_dims, 1j), 1)
+
+        # policy_persuasion and trait_persuasion scale how
+        #   effectively this politician shifts citizen Gaussians
+        #   during the campaign phase (DESIGN.md §8.6.2–§8.6.3).
+        #   f_pol = policy_persuasion scales engagement and
+        #   position/spread shifts driven by policy overlaps;
+        #   f_trait = trait_persuasion scales engagement shifts
+        #   driven by trait overlaps. Both are drawn from
+        #   zero-mean Gaussians so that politicians vary in
+        #   how persuasive they are, with the sign encoding
+        #   direction of effect (positive = amplifies shifts,
+        #   negative = dampens). These are distinct from
+        #   policy_influence and trait_influence below, which
+        #   operate in the governing phase rather than the
+        #   campaign phase. Applied by TODO #21.
+        self.policy_persuasion = rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]
+                ["policy_persuasion_stddev"]))
+        self.trait_persuasion = rng.normal(loc=0.0,
+                scale=float(settings.infile_dict[1]["politicians"]
+                ["trait_persuasion_stddev"]))
 
         self.policy_influence = rng.normal(loc=0.0,
                 scale=float(settings.infile_dict[1]["politicians"]
@@ -170,10 +204,36 @@ class Politician():
 
 
     def move(self):
-        # Move according to the strategy that this politician is following.
+        # Move according to the strategy that this
+        #   politician is following.
         if (self.move_strategy == 0):
             # Select a random patch within the same zone.
             self.patch = self.zone.random_patch()
+        elif (self.move_strategy == 1):
+            # Teleport to the highest-population patch in
+            #   the zone and stay there.
+            best = self.zone.patches[0]
+            for p in self.zone.patches[1:]:
+                if len(p.citizen_list) > len(
+                        best.citizen_list):
+                    best = p
+            self.patch = best
+        elif (self.move_strategy == 2):
+            # Visit low-to-middle population patches in
+            #   order, cycling through them. Sort patches
+            #   by population (ascending), take the bottom
+            #   half, and advance through them round-robin.
+            sorted_patches = sorted(
+                self.zone.patches,
+                key=lambda p: len(p.citizen_list))
+            mid = max(1, len(sorted_patches) // 2)
+            targets = sorted_patches[:mid]
+            try:
+                idx = targets.index(self.patch)
+                self.patch = targets[
+                    (idx + 1) % len(targets)]
+            except ValueError:
+                self.patch = targets[0]
 
 
     def adapt_to_patch(self, world):
@@ -198,21 +258,3 @@ class Politician():
             self.ext_trait.update_integration_variables()
 
 
-    def persuade(self, world):
-        # Iterate over the list of citizens in the patch that the politician
-        #   is currently on.
-
-        #
-
-        for citizen in self.patch.citizen_list:
-            pass
-            # Compare each policy position of the citizen with the current
-            #   apparent policy position of the politician.
-            #
-            # In the explanation given below, mirror symmetry has the same
-            #   result.
-            # If the governing policy is left of the citizen and the
-            #   politician policy is left
-
-        world.properties[0].data = (world.properties[0].data
-                + rng.uniform(high=0.01))
