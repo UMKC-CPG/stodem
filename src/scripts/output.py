@@ -877,6 +877,7 @@ def write_paraview_script(settings, world):
     script_path = (
         f"{settings.outfile}_paraview.py")
     bn = os.path.basename(script_path)
+    xdmf_bn = os.path.basename(xdmf_abs)
 
     with open(script_path, "w") as fh:
 
@@ -905,8 +906,16 @@ def write_paraview_script(settings, world):
         fh.write(
             "# ---- Simulation metadata"
             " (do not edit) ----\n"
-            f"GLYPHS_XDMF     ="
-            f" r'{xdmf_abs}'\n"
+            "# GLYPHS_XDMF is resolved at"
+            " runtime relative to this\n"
+            "# script so the files can be"
+            " copied to any machine.\n"
+            f"# Generated from: {xdmf_abs}\n"
+            "import os as _os\n"
+            "_here = _os.path.dirname(\n"
+            "    _os.path.abspath(__file__))\n"
+            "GLYPHS_XDMF = _os.path.join(\n"
+            f"    _here, '{xdmf_bn}')\n"
             f"NUM_POLICY_DIMS = {ndp}\n"
             f"NUM_TRAIT_DIMS  = {ndt}\n"
             f"NUM_ZONE_TYPES  = {nzt}\n"
