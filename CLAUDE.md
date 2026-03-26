@@ -55,7 +55,8 @@ The codebase has been refactored from a monolithic `stodem.py` into separate mod
 | `stodem.py` | Entry point, design discussion comments, main simulation loop |
 | `settings.py` | `ScriptSettings` — XML + command line config, loads `$STODEM_RC/stodemrc.py` |
 | `sim_control.py` | `SimControl`, `SimProperty` — simulation phases and data range computation |
-| `world.py` | `World` — main container for patches, zones, citizens, politicians, government |
+| `world.py` | `World` — main container; computes patch-level well-being, citizen Gaussian stats, and zone-upsampled politician stats via `compute_patch_well_being()`, `compute_patch_gaussian_stats()`, `compute_patch_politician_stats()` |
+| `diagnostics.py` | Diagnostic utilities for simulation debugging |
 | `zone.py` | `Zone` — geographic region at one hierarchy level |
 | `patch.py` | `Patch` — basic grid unit containing citizens |
 | `citizen.py` | `Citizen` — agent with Gaussian policy/trait preferences, aversions, ideal positions |
@@ -113,8 +114,19 @@ Key sections:
 
 ## Output Files
 
-- `*.hdf5`: Binary simulation data with compression
-- `*.xdmf`: XML metadata for Paraview visualization
+- `*.hdf5`: Binary simulation data with compression.
+  Two groups: `CitizenGeoData` (patch-level citizen
+  averages) and `PoliticianGeoData` (zone-upsampled
+  politician averages). Fields: `WellBeing`, plus
+  mu/sigma/cos_theta for each Gaussian per dimension.
+  Citizen fields: `PolicyPref`, `PolicyAver`,
+  `IdealPolicy` (per policy dim); `TraitPref`,
+  `TraitAver` (per trait dim). Politician fields:
+  `InnPolicyPref`, `InnPolicyAver`, `ExtPolicyPref`,
+  `ExtPolicyAver` (per policy dim); `InnTrait`,
+  `ExtTrait` (per trait dim) — suffixed `_ZT{zt}`.
+- `*.xdmf`: XML metadata for Paraview; written after
+  simulation completes using actual steps written.
 - `command`: Execution log with timestamps
 
 ## Known Issues

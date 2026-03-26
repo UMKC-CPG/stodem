@@ -5,6 +5,7 @@ message("At the set of scripts.")
 
 set (SCRIPTS
 citizen.py
+diagnostics.py
 gaussian.py
 government.py
 output.py

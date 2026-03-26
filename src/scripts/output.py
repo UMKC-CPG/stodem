@@ -49,9 +49,10 @@ class Hdf5():
         self.dataset_did = {}
 
         for p in world.properties:
-            self.group_gid[p.group] = (
-                self.h_fid.create_group(
-                    f"{p.group}"))
+            if p.group not in self.group_gid:
+                self.group_gid[p.group] = (
+                    self.h_fid.create_group(
+                        f"{p.group}"))
 
     def add_dataset(self, p, i):
         """Write one time step's data for a

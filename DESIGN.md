@@ -59,7 +59,10 @@ single clear responsibility, organized here by functional group.
 
 - `world.py` (`World`) — Top-level container. Creates
   patches, zones, citizens, politicians, government.
-  Aggregates patch-level well-being for output.
+  Computes patch-level output fields via
+  `compute_patch_well_being()`,
+  `compute_patch_gaussian_stats()`, and
+  `compute_patch_politician_stats()`.
 - `zone.py` (`Zone`) — Geographic region at one hierarchy
   level. Maintains politician lists and citizen zone
   averages.
@@ -522,8 +525,11 @@ time steps.
     derived variable updates (§8.6.5–§8.6.7). **Not
     yet implemented** (TODO #8).
 
-11. **Aggregate and output** — Patch-level well-being
-    is computed and written to HDF5.
+11. **Aggregate and output** — Patch-level well-being,
+    per-Gaussian citizen statistics (mu, sigma,
+    cos_theta), and zone-upsampled politician
+    statistics are computed and written to HDF5
+    (see §12).
 
 ### 7.4 Vote Phase
 
@@ -1616,30 +1622,96 @@ spread (§7.5.4).
 
 ### 12.1 HDF5
 
-Binary data file with gzip compression. Organized as:
+Binary data file with gzip compression. All properties share
+patch-level dimensions (x_patches × y_patches). Properties
+are organized into two HDF5 groups; each property writes one
+dataset per simulation time step (e.g., `WellBeing0`,
+`WellBeing1`, ...). The `Hdf5` class creates each group once
+at initialization (guarded against duplicate creation) and
+adds datasets incrementally.
+
+**Group `CitizenGeoData`** — patch-level per-citizen averages.
+
+Scalar field written every step:
+
+- `WellBeing` — average citizen well-being per patch.
+
+For each **policy dimension** d, three citizen Gaussians
+each contribute three fields (mu, sigma, cos_theta):
+
+| Field pattern | Gaussian |
+|---|---|
+| `PolicyPrefMu{d}`, `PolicyPrefSigma{d}`, `PolicyPrefCosTheta{d}` | `stated_policy_pref` |
+| `PolicyAverMu{d}`, `PolicyAverSigma{d}`, `PolicyAverCosTheta{d}` | `stated_policy_aver` |
+| `IdealPolicyMu{d}`, `IdealPolicySigma{d}`, `IdealPolicyCosTheta{d}` | `ideal_policy_pref` |
+
+For each **trait dimension** d, two citizen Gaussians:
+
+| Field pattern | Gaussian |
+|---|---|
+| `TraitPrefMu{d}`, `TraitPrefSigma{d}`, `TraitPrefCosTheta{d}` | `stated_trait_pref` |
+| `TraitAverMu{d}`, `TraitAverSigma{d}`, `TraitAverCosTheta{d}` | `stated_trait_aver` |
+
+**Group `PoliticianGeoData`** — zone-averaged politician
+fields upsampled to patch resolution. Each patch receives
+the average value of the politicians in its zone. Separate
+fields are written for each zone type `ZT{zt}`.
+
+For each **policy dimension** d and zone type zt, four
+politician Gaussians each contribute three fields:
+
+| Field pattern | Gaussian |
+|---|---|
+| `InnPolicyPrefMu{d}_ZT{zt}`, `InnPolicyPrefSigma{d}_ZT{zt}`, `InnPolicyPrefCosTheta{d}_ZT{zt}` | `innate_policy_pref` |
+| `InnPolicyAverMu{d}_ZT{zt}`, `InnPolicyAverSigma{d}_ZT{zt}`, `InnPolicyAverCosTheta{d}_ZT{zt}` | `innate_policy_aver` |
+| `ExtPolicyPrefMu{d}_ZT{zt}`, `ExtPolicyPrefSigma{d}_ZT{zt}`, `ExtPolicyPrefCosTheta{d}_ZT{zt}` | `ext_policy_pref` |
+| `ExtPolicyAverMu{d}_ZT{zt}`, `ExtPolicyAverSigma{d}_ZT{zt}`, `ExtPolicyAverCosTheta{d}_ZT{zt}` | `ext_policy_aver` |
+
+For each **trait dimension** d and zone type zt, two
+politician Gaussians:
+
+| Field pattern | Gaussian |
+|---|---|
+| `InnTraitMu{d}_ZT{zt}`, `InnTraitSigma{d}_ZT{zt}`, `InnTraitCosTheta{d}_ZT{zt}` | `innate_trait` |
+| `ExtTraitMu{d}_ZT{zt}`, `ExtTraitSigma{d}_ZT{zt}`, `ExtTraitCosTheta{d}_ZT{zt}` | `ext_trait` |
+
+**Upsampling rationale**: Politician data naturally lives at
+zone resolution, but all output fields share the same
+patch-level grid. Each patch is colored with the average
+value of the politicians in its zone (`patch.zone_index[zt]`
+indexes the zone). Zone boundaries appear in Paraview as
+color discontinuities. This design is forward-compatible
+with non-rectangular zone shapes (e.g., future dynamic
+districts), since upsampling uses `patch.zone_index[zt]`
+regardless of zone geometry.
+
+**Property index layout in `world.properties`**
+(P = num_policy_dims, T = num_trait_dims,
+ZT = num_zone_types):
 
 ```
-<outfile>.hdf5
-  /CitizenGeoData/
-    WellBeing0    (x_patches x y_patches)
-    WellBeing1
-    ...
+[0]                    WellBeing
+[1 .. 9P]              CitizenGeoData policy fields
+                       (9 per dim: 3 Gaussians × 3 stats)
+[9P+1 .. 9P+6T]        CitizenGeoData trait fields
+                       (6 per dim: 2 Gaussians × 3 stats)
+[9P+6T+1 ..]           PoliticianGeoData fields
+                       ((12P+6T) per zone type × ZT types)
 ```
-
-Each dataset corresponds to one time step. The `Hdf5` class
-creates groups at initialization and adds datasets
-incrementally as the simulation runs.
 
 ### 12.2 XDMF
 
-XML metadata file that describes the HDF5 data layout for
-Paraview visualization. Written entirely at initialization
-time based on `total_num_steps`. This creates a potential
-mismatch if the simulation terminates early (see TODO #18).
+XML metadata file for Paraview. Written after the simulation
+completes using the actual number of steps written (not
+`total_num_steps`, to handle early termination correctly).
 
 Structure: a temporal collection grid containing one uniform
 grid per time step, each with 2DCoRectMesh topology and
-ORIGIN_DXDY geometry pointing to the HDF5 datasets.
+ORIGIN_DXDY geometry. All properties — both CitizenGeoData
+and PoliticianGeoData — are listed as Attribute elements
+under each time step grid, all sharing the same patch-level
+topology. No structural change to the XDMF format is needed
+to support the additional fields.
 
 ---
 

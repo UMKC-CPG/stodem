@@ -736,12 +736,14 @@ def campaign(sim_control, settings, world,
 
         # - Aggregate well being to patches for output.
         world.compute_patch_well_being()
+        world.compute_patch_gaussian_stats()
+        world.compute_patch_politician_stats()
 
         # Add current world properties to the HDF5 file.
         print (world.properties[0])
-        hdf5.add_dataset(
-            world.properties[0],
-            sim_control.curr_step)
+        for p in world.properties:
+            hdf5.add_dataset(
+                p, sim_control.curr_step)
 
         # Log diagnostics (no forces during
         #   campaign).
@@ -1021,9 +1023,11 @@ def govern(sim_control, world, hdf5,
         for citizen in world.citizens:
             citizen.recompute_well_being(world)
         world.compute_patch_well_being()
-        hdf5.add_dataset(
-            world.properties[0],
-            sim_control.curr_step)
+        world.compute_patch_gaussian_stats()
+        world.compute_patch_politician_stats()
+        for p in world.properties:
+            hdf5.add_dataset(
+                p, sim_control.curr_step)
 
         # Log diagnostics with the forces
         #   that were applied this step and the
