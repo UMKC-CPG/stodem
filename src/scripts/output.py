@@ -1055,6 +1055,8 @@ def write_paraview_script(settings, world):
             " +Z (z_sign=+1), -Z (-1), +X (0).\"\"\"\n"
             "    g = Glyph(Input=src,"
             " GlyphType='Arrow')\n"
+            "    g.Orient = 0"
+            "  # static transform only, no data vector\n"
             "    g.ScaleArray = ['POINTS',"
             " f'inv_sigma_d{dim}']\n"
             "    g.ScaleFactor = scale\n"
