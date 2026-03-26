@@ -1,114 +1,240 @@
 import numpy as np
 
-from gaussian import Gaussian
+from gaussian import Gaussian, sample_theta
 from random_state import rng
 
 
 class Citizen():
-    # Citizens have an innate "personality trait" preference and aversion
-    #   that can change to align with a politician.
+    """A citizen agent in the democracy simulation.
 
-    # Citizens have a stated policy position for each policy. This is the
-    #   policy position that the citizen claims to align with and it will
-    #   affect their preference for a particular politician. Similarly, each
-    #   citizen has an aversion associated with each policy.
+    Citizens are the primary agents whose collective
+    behavior produces emergent democratic outcomes.
+    Each citizen maintains a set of Gaussians that
+    encode their political positions and engagement:
 
-    # Citizens have a most-beneficial policy position that the citizen does
-    #   not directly know. I.e., the well-being of the citizen will depend on
-    #   the alignment between governing policy and this most-beneficial
-    #   policy, but the stated policy may be quite different than the
-    #   most-beneficial policy. For example, if a policy represented "tax
-    #   rates", it is hard to know what the best tax rate for an individual
-    #   should be. If it was set to zero, the individual would pay nothing,
-    #   but also likely have no services. If it was set to 100% they would
-    #   have no money, but would have many servies. The "correct" number is
-    #   not easy for any individual to know and that individual's stated
-    #   preference may easily be different from whatever number actually
-    #   benefits them the most.
+    POLICY GAUSSIANS (one per policy dimension):
+      stated_policy_pref (Pcp): The citizen's
+        conscious policy preference. Used when
+        comparing with politicians, other citizens,
+        and the government. Positive-valued
+        (cos(theta) > 0).
+      stated_policy_aver (Pca): The citizen's
+        conscious policy aversion. Represents what
+        the citizen actively opposes. Negative-valued
+        (cos(theta) < 0).
+      ideal_policy_pref (Pci): The citizen's true
+        best interest, which they do not directly
+        know. Compared with government enacted
+        policy to determine well-being. Never
+        modified by influence — represents an
+        objective ground truth.
 
-    # Citizens have a probability of participation that is computed from
-    #   their average engagement: P(vote) = mean(|cos(theta)|) across all
-    #   stated Gaussians. This is recomputed each time the citizen votes.
+    TRAIT GAUSSIANS (one per trait dimension):
+      stated_trait_pref (Tcp): Personality
+        preference. Positive-valued.
+      stated_trait_aver (Tca): Personality aversion.
+        Negative-valued.
 
-    # Citizens have a well-being factor that weights the degree to which
-    #   they will use personality or policy alignment when deciding how to
+    Key behavioral properties:
+      - Citizen Gaussians are modified each campaign
+        step by three influence sources: politician
+        persuasion, well-being feedback, and citizen
+        collective (community norms).
+      - The "trait gates policy" principle governs
+        how much policy positions shift: trait
+        alignment with a source determines the
+        magnitude and type of policy shift.
+      - Engagement (theta) determines both the
+        probability of voting and the citizen's
+        resistance to position shifts
+        (susceptibility).
+      - Well-being (overlap of Pci with Pge) drives
+        engagement: both very positive and very
+        negative well-being increase engagement.
+    """
+
+    # --- Detailed conceptual notes for students ---
+    #
+    # Citizens have an innate "personality trait"
+    #   preference and aversion that can change to
+    #   align with a politician.
+    #
+    # Citizens have a stated policy position for
+    #   each policy. This is the policy position
+    #   that the citizen claims to align with and
+    #   it will affect their preference for a
+    #   particular politician. Similarly, each
+    #   citizen has an aversion associated with
+    #   each policy.
+    #
+    # Citizens have a most-beneficial policy
+    #   position that the citizen does not directly
+    #   know. I.e., the well-being of the citizen
+    #   will depend on the alignment between
+    #   governing policy and this most-beneficial
+    #   policy, but the stated policy may be quite
+    #   different than the most-beneficial policy.
+    #   For example, if a policy represented "tax
+    #   rates", it is hard to know what the best
+    #   tax rate for an individual should be. If it
+    #   was set to zero, the individual would pay
+    #   nothing, but also likely have no services.
+    #   If it was set to 100% they would have no
+    #   money, but would have many services. The
+    #   "correct" number is not easy for any
+    #   individual to know and that individual's
+    #   stated preference may easily be different
+    #   from whatever number actually benefits them
+    #   the most.
+    #
+    # Citizens have a probability of participation
+    #   that is computed from their average
+    #   engagement: P(vote) = mean(|cos(theta)|)
+    #   across all stated Gaussians. This is
+    #   recomputed each time the citizen votes.
+    #
+    # Citizens have a well-being factor that weights
+    #   the degree to which they will use personality
+    #   or policy alignment when deciding how to
     #   cast their vote.
 
 
     def __init__(self, settings, patch, zones):
+        """Initialize a citizen with random Gaussian
+        positions drawn from the XML configuration.
 
-        # Get temporary local names for settings variables.
+        Each citizen receives:
+          - 3 policy Gaussians per policy dimension
+            (stated pref, stated aver, ideal pref)
+          - 2 trait Gaussians per trait dimension
+            (stated pref, stated aver)
+          - Scalar parameters: policy_trait_ratio,
+            collective_influence_rate, sigma_floor,
+            engagement_decay_rate, defensive_ratio
+          - A patch assignment and zone membership
+
+        Parameters
+        ----------
+        settings : ScriptSettings
+            Provides XML configuration for Gaussian
+            initialization parameters.
+        patch : Patch
+            The patch this citizen is placed on.
+        zones : list of list of Zone
+            The full zone hierarchy. The citizen
+            determines which zones it belongs to
+            based on its patch's zone_index.
+        """
+        # Get temporary local names for settings
+        #   variables.
         self.num_policy_dims = int(
-                settings.infile_dict[1]["world"]["num_policy_dims"])
+                settings.infile_dict[1][
+                    "world"]["num_policy_dims"])
         self.num_trait_dims = int(
-                settings.infile_dict[1]["world"]["num_trait_dims"])
+                settings.infile_dict[1][
+                    "world"]["num_trait_dims"])
 
         # Define the initial instance variables of this citizen.
 
-        # Theta (orientation) sign convention: preference Gaussians use
-        #   theta with Im(theta) in [0, pi/2), giving cos(theta) > 0
-        #   (positive-valued). Aversion Gaussians use Im(theta) in
-        #   (pi/2, pi], giving cos(theta) < 0 (negative-valued). This
-        #   ensures same-type integrals (pref x pref, aver x aver) are
-        #   non-negative and cross-type integrals (pref x aver) are
-        #   non-positive — encoding attraction vs. repulsion without
-        #   special-casing. Preferences start at theta = 1j
-        #   (cos(1) ≈ 0.54); aversions at theta = (pi-1)j
-        #   (cos(pi-1) = -cos(1) ≈ -0.54), matching engagement magnitude.
-        #   Theta is currently hardcoded; the *_orien_stddev XML
-        #   parameters are reserved for a future extension where
-        #   initial Im(theta) is drawn from a configurable
-        #   distribution (see DESIGN.md §4.1 and TODO #29).
+        # Theta (orientation) sign convention:
+        #   preference Gaussians use Im(theta) in
+        #   [0, pi/2), giving cos(theta) > 0
+        #   (positive-valued). Aversion Gaussians use
+        #   Im(theta) in (pi/2, pi], giving
+        #   cos(theta) < 0 (negative-valued). This
+        #   ensures same-type integrals (pref x pref,
+        #   aver x aver) are non-negative and
+        #   cross-type integrals (pref x aver) are
+        #   non-positive — encoding attraction vs.
+        #   repulsion without special-casing.
+        #   The default means are 1 (preferences) and
+        #   pi-1 (aversions), giving cos(1) ~ 0.54
+        #   and cos(pi-1) ~ -0.54 respectively.
+        #   If the *_orien_stddev XML parameter is
+        #   numeric, Im(theta) is drawn from a normal
+        #   distribution with the default as the mean
+        #   and the parameter as the stddev, clamped
+        #   to the appropriate half of [0, pi].
+        #   Otherwise (e.g., "imaginary"), the default
+        #   mean is used for all agents.
+        half_pi = np.pi / 2.0
+        cit = settings.infile_dict[1]["citizens"]
 
-        self.stated_policy_pref = Gaussian(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_pref_pos_stddev"]),
-                size=self.num_policy_dims),
+        self.stated_policy_pref = Gaussian(
+                rng.normal(loc=0.0,
+                    scale=float(
+                        cit["policy_pref_pos_stddev"]),
+                    size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_pref_stddev_stddev"]),
-                size=self.num_policy_dims)),
-                np.full(self.num_policy_dims, 1j), 1)
+                    scale=float(
+                        cit["policy_pref_stddev_stddev"]),
+                    size=self.num_policy_dims)),
+                sample_theta(
+                    cit["policy_pref_orien_stddev"],
+                    1.0, self.num_policy_dims,
+                    0.0, half_pi),
+                1)
 
-        self.stated_policy_aver = Gaussian(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_aver_pos_stddev"]),
-                size=self.num_policy_dims),
+        self.stated_policy_aver = Gaussian(
+                rng.normal(loc=0.0,
+                    scale=float(
+                        cit["policy_aver_pos_stddev"]),
+                    size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_aver_stddev_stddev"]),
-                size=self.num_policy_dims)),
-                np.full(self.num_policy_dims, (np.pi - 1) * 1j), 1)
+                    scale=float(
+                        cit["policy_aver_stddev_stddev"]),
+                    size=self.num_policy_dims)),
+                sample_theta(
+                    cit["policy_aver_orien_stddev"],
+                    np.pi - 1.0, self.num_policy_dims,
+                    half_pi, np.pi),
+                1)
 
-        self.ideal_policy_pref = Gaussian([x + rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["ideal_policy_pref_pos_stddev"]))
-                for x in self.stated_policy_pref.mu],
-                np.abs(rng.normal(loc=0.0, scale=[float(
-                settings.infile_dict[1]["citizens"]
-                ["ideal_policy_pref_stddev_stddev"])
-                for x in range(self.num_policy_dims)])),
-                [1 + 0j for x in range(self.num_policy_dims)], 1)
-
-        self.stated_trait_pref = Gaussian(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_pref_pos_stddev"]),
-                size=self.num_trait_dims),
+        self.ideal_policy_pref = Gaussian(
+                [x + rng.normal(loc=0.0,
+                    scale=float(
+                        cit["ideal_policy_pref_pos_stddev"]))
+                    for x in self.stated_policy_pref.mu],
                 np.abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_pref_stddev_stddev"]),
-                size=self.num_trait_dims)),
-                np.full(self.num_trait_dims, 1j), 1)
+                    scale=[float(
+                        cit["ideal_policy_pref_stddev_stddev"])
+                        for x in range(
+                            self.num_policy_dims)])),
+                sample_theta(
+                    cit["ideal_policy_pref_orien_stddev"],
+                    0.0, self.num_policy_dims,
+                    0.0, half_pi),
+                1)
 
-        self.stated_trait_aver = Gaussian(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_aver_pos_stddev"]),
-                size=self.num_trait_dims),
+        self.stated_trait_pref = Gaussian(
+                rng.normal(loc=0.0,
+                    scale=float(
+                        cit["trait_pref_pos_stddev"]),
+                    size=self.num_trait_dims),
                 np.abs(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["trait_aver_stddev_stddev"]),
-                size=self.num_trait_dims)),
-                np.full(self.num_trait_dims, (np.pi - 1) * 1j), 1)
+                    scale=float(
+                        cit["trait_pref_stddev_stddev"]),
+                    size=self.num_trait_dims)),
+                sample_theta(
+                    cit["trait_pref_orien_stddev"],
+                    1.0, self.num_trait_dims,
+                    0.0, half_pi),
+                1)
+
+        self.stated_trait_aver = Gaussian(
+                rng.normal(loc=0.0,
+                    scale=float(
+                        cit["trait_aver_pos_stddev"]),
+                    size=self.num_trait_dims),
+                np.abs(rng.normal(loc=0.0,
+                    scale=float(
+                        cit["trait_aver_stddev_stddev"]),
+                    size=self.num_trait_dims)),
+                sample_theta(
+                    cit["trait_aver_orien_stddev"],
+                    np.pi - 1.0, self.num_trait_dims,
+                    half_pi, np.pi),
+                1)
 
         self.policy_consistency = self.policy_alignment()
 
@@ -120,17 +246,22 @@ class Citizen():
                 settings.infile_dict[1]["citizens"]
                 ["collective_influence_rate"])
 
-        # sigma_floor is the minimum allowed value for any
-        #   Gaussian's sigma (standard deviation / spread).
-        #   Without it, sigma could reach zero, making the
-        #   Gaussian infinitely narrow and causing a
-        #   division-by-zero in alpha = 1/(2*sigma^2). It
-        #   also embodies a physical idea: no citizen becomes
-        #   so certain about any position that their
-        #   Gaussian collapses to a delta function. The
-        #   floor is also the target sigma for defensive
-        #   narrowing (TODO #21): a citizen under backlash
-        #   rigidifies toward sigma_floor, not toward zero.
+        # sigma_floor is the minimum allowed value
+        #   for any Gaussian's sigma (standard
+        #   deviation / spread). Without it, sigma
+        #   could reach zero, making the Gaussian
+        #   infinitely narrow and causing a
+        #   division-by-zero in alpha = 1/(2*sigma^2).
+        #   It also embodies a physical idea: no
+        #   citizen becomes so certain about any
+        #   position that their Gaussian collapses to
+        #   a delta function. The floor is also the
+        #   target sigma for defensive narrowing: a
+        #   citizen under backlash (negative trait
+        #   alignment with a politician) rigidifies
+        #   their preference sigma toward sigma_floor,
+        #   not toward zero. See the defensive branch
+        #   in build_response_to_politician_influence().
         self.sigma_floor = float(
                 settings.infile_dict[1]["citizens"]
                 ["sigma_floor"])
@@ -206,32 +337,83 @@ class Citizen():
 
 
     def compute_all_overlaps(self, world):
+        """Compute all overlap integrals between
+        this citizen and every relevant entity:
+        politicians, zone-average citizens, and
+        government.
 
-        # Initialize the integral solution lists.
+        This is the "sensing" step of each campaign
+        iteration. The overlap integrals quantify
+        how aligned or opposed this citizen is to
+        each politician, each community norm, and
+        the government's enacted policy. These
+        integrals are then consumed by the three
+        build_response_to_*() methods to compute
+        engagement and position shifts.
+
+        The integrals are stored in lists indexed
+        by politician or zone. For example,
+        self.Pcp_Ppp_ol[i] is a numpy array of
+        per-dimension overlaps between this
+        citizen's policy preference and politician
+        i's external policy preference.
+
+        Prerequisite: zone averages must have been
+        computed for the current step (done in
+        campaign() before this method is called).
+        """
+
+        # Clear and re-initialize all integral
+        #   storage lists.
         self.initialize_lists()
 
-        # Compute the integrals between the current self citizen and all
-        #   relevant politicians
+        # Citizen ↔ politician integrals (one entry
+        #   per politician in self.politician_list).
         self.policy_politician_integrals()
         self.trait_politician_integrals()
 
-        # Assume that the citizen zone averages have been computed. Then compute
-        #   the integrals between the current self citizen and all the relevant
-        #   citizen zone averages.
+        # Citizen ↔ zone-average-citizen integrals
+        #   (one entry per zone in self.zone_list).
         self.policy_citizen_integrals()
         self.trait_citizen_integrals()
 
-        # Compute the integrals between the current self citizen and all
-        #   government enacted policies.
+        # Citizen ↔ government integrals (one entry
+        #   total, since there is one government).
         self.policy_government_integrals(world)
 
 
     def initialize_lists(self):
+        """Initialize (or reset) all overlap
+        integral storage lists to empty.
 
-        # Initialize lists that will hold overlap integral solutions between
-        #   citizen and politicians (policy and trait, preference and
-        #   aversion).
-        # Policy: citizen preference vs politician preference
+        Naming convention for overlap lists:
+          {citizen_type}_{other_type}_ol
+
+        Where the abbreviations are:
+          Pcp = Policy citizen preference
+          Pca = Policy citizen aversion
+          Pci = Policy citizen ideal
+          Ppp = Policy politician preference
+          Ppa = Policy politician aversion
+          Tcp = Trait citizen preference
+          Tca = Trait citizen aversion
+          Tpx = Trait politician external
+          Pge = Policy government enacted
+
+        Each list element is a numpy array of shape
+        (num_dims,) — one overlap value per policy
+        or trait dimension. The list index
+        corresponds to the politician index (for
+        citizen↔politician lists) or zone index
+        (for citizen↔zone-average lists).
+        """
+
+        # --- Citizen ↔ politician overlaps ---
+        # One entry per politician. Four policy
+        #   combinations + two trait combinations
+        #   = six lists.
+        # Policy: citizen preference vs politician
+        #   preference.
         self.Pcp_Ppp_ol = []
         self.Pcp_Ppa_ol = [] # Policy: citizen preference vs politician aversion
         self.Pca_Ppp_ol = [] # Policy: citizen aversion vs politician preference
@@ -892,26 +1074,175 @@ class Citizen():
         self.stated_trait_aver.update_integration_variables()
 
 
+    def recompute_well_being(self, world):
+        """Recompute well-being from the current
+        Pge without accumulating engagement shifts.
+
+        Used during the govern phase to update the
+        well-being scalar for output after each
+        govern step changes Pge. Unlike
+        build_response_to_well_being(), this method
+        does NOT call _well_being_to_engagement()
+        because the govern phase has no
+        accumulate-then-apply cycle.
+
+        Pge.update_integration_variables() must be
+        called before this method so that the
+        integral uses the updated Pge parameters.
+        """
+        ol = self.ideal_policy_pref.integral(
+            world.government.enacted_policy)
+        self.well_being = sum(ol)
+
+
     def build_response_to_well_being(self):
+        """Compute well-being and accumulate the
+        resulting engagement shifts.
+
+        Well-being is computed from the overlap
+        between the citizen's IDEAL policy positions
+        (Pci — the objectively best policy for this
+        citizen, which they do not consciously know)
+        and the government's enacted policy (Pge).
+        A positive value means the government's
+        policy is objectively benefiting this
+        citizen; a negative value means it is
+        harming them.
+
+        Note the key distinction: well-being is
+        based on IDEAL positions (Pci), not STATED
+        positions (Pcp). A citizen may feel
+        dissatisfied (stated pref far from Pge) yet
+        have high well-being (ideal pref close to
+        Pge), or vice versa. This captures the
+        reality that people don't always know what
+        policies actually benefit them.
+
+        The well-being scalar is then mapped to
+        engagement shifts via
+        _well_being_to_engagement(). This method is
+        encapsulated separately so that the richer
+        well-being model (DESIGN.md §8.5: resource,
+        perceived satisfaction, resentment) can
+        replace the mapping without restructuring
+        this call site.
+
+        This method writes only to the engagement
+        shift arrays (orien_shift), not to the
+        citizen's Gaussians directly. The actual
+        application happens in apply_influence_shifts().
+        """
         self.well_being = sum(self.Pci_Pge_ol[0])
+        self._well_being_to_engagement()
+
+
+    def _well_being_to_engagement(self):
+        """Map the well-being scalar to engagement
+        shifts for all four Gaussian types.
+
+        The core idea: |well_being| drives all
+        Gaussians toward their engaged poles.
+        Citizens doing very well (high positive
+        well-being) are engaged because the system
+        is working for them and they want to
+        preserve it. Citizens doing very poorly
+        (large negative) are engaged because they
+        are motivated to change things. Only
+        near-zero well-being (policy is neutral
+        to the citizen) provides no engagement
+        stimulus.
+
+        This follows the same "absolute value
+        drives engagement" principle used in
+        politician influence (where |overlap|
+        shifts theta toward real) and citizen
+        collective influence. Engagement is about
+        caring, not about approval.
+
+        The shift magnitude |well_being| is applied
+        uniformly across all policy and trait
+        dimensions. Well-being is a whole-citizen
+        state (derived from all policy dimensions
+        summed together), so it affects engagement
+        on ALL issues equally, not dimension by
+        dimension.
+
+        The actual theta modification happens later
+        in apply_influence_shifts(), where these
+        accumulated orien_shift values are
+        subtracted from preference Im(theta) (driving
+        it toward 0) or added to aversion Im(theta)
+        (driving it toward pi).
+        """
+        mag = abs(self.well_being)
+        n = self.num_policy_dims
+        m = self.num_trait_dims
+
+        self.Pcp_orien_shift += np.full(n, mag)
+        self.Pca_orien_shift += np.full(n, mag)
+        self.Tcp_orien_shift += np.full(m, mag)
+        self.Tca_orien_shift += np.full(m, mag)
 
 
     def score_candidates(self, world):
+        """Score each politician this citizen could
+        vote for, producing a single scalar per
+        politician that determines vote choice.
 
+        The score is a weighted combination of
+        policy alignment and trait alignment:
+
+          score = w_policy * policy_sum
+                  + w_trait * trait_sum
+
+        where:
+          w_policy = 0.5 + policy_trait_ratio
+          w_trait  = 0.5 - policy_trait_ratio
+
+        Since policy_trait_ratio is clamped to
+        [-0.5, +0.5] at initialization, both
+        weights are non-negative and sum to 1.
+        A citizen with ratio = 0 weights policy
+        and trait equally; ratio > 0 favors policy;
+        ratio < 0 favors trait (personality).
+
+        policy_sum includes ALL four citizen-
+        politician policy overlaps per politician:
+          I(Pcp, Ppp) + I(Pca, Ppa)  (same-type:
+            agreement, positive)
+          + I(Pcp, Ppa) + I(Pca, Ppp)  (cross-type:
+            disagreement, negative)
+        A politician aligned with the citizen's
+        preferences and aversions gets a high
+        positive score; one who opposes them gets
+        a negative score.
+
+        trait_sum includes both trait overlaps:
+          I(Tcp, Tpx) + I(Tca, Tpx)
+        Same logic: trait affinity adds positively,
+        trait aversion adds negatively.
+
+        The politician_score list is parallel to
+        politician_list: politician_score[i] is the
+        score for politician_list[i].
+        """
         w_policy = 0.5 + self.policy_trait_ratio
         w_trait = 0.5 - self.policy_trait_ratio
 
         pol_index = 0
         self.politician_score = []
         for politician in self.politician_list:
-            policy_sum = (sum(self.Pcp_Ppp_ol[pol_index])
-                    + sum(self.Pca_Ppa_ol[pol_index])
-                    + sum(self.Pcp_Ppa_ol[pol_index])
-                    + sum(self.Pca_Ppp_ol[pol_index]))
-            trait_sum = (sum(self.Tcp_Tpx_ol[pol_index])
-                    + sum(self.Tca_Tpx_ol[pol_index]))
+            policy_sum = (
+                sum(self.Pcp_Ppp_ol[pol_index])
+                + sum(self.Pca_Ppa_ol[pol_index])
+                + sum(self.Pcp_Ppa_ol[pol_index])
+                + sum(self.Pca_Ppp_ol[pol_index]))
+            trait_sum = (
+                sum(self.Tcp_Tpx_ol[pol_index])
+                + sum(self.Tca_Tpx_ol[pol_index]))
             self.politician_score.append(
-                    w_policy * policy_sum + w_trait * trait_sum)
+                w_policy * policy_sum
+                + w_trait * trait_sum)
             pol_index += 1
 
 

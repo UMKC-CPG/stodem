@@ -373,8 +373,8 @@
 #   who aligns with your preferences will make you engage in support.
 #   Weak overlap leads to weak engagement change.
 #
-#   The politician's policy_influence and trait_influence parameters
-#   scale the magnitude of these engagement shifts.
+#   The politician's policy_persuasion and trait_persuasion
+#   parameters scale the magnitude of these engagement shifts.
 #
 # --- Politician-driven citizen policy position and spread shifts ---
 #
@@ -392,16 +392,16 @@
 #     - Citizen policy aversion sigma shifts toward the politician's
 #       apparent policy aversion sigma.
 #     All shifts are proportional to |trait_sum| and scaled by the
-#       politician's policy_influence parameter.
+#       politician's policy_persuasion parameter.
 #
 #   If the citizen dislikes the politician (negative trait sum):
 #     - No preference mu movement. The citizen will not change their
 #       stated policy preference position.
 #     - Citizen policy preference sigma narrows (citizen becomes more
-#       rigid), proportional to |trait_sum| * policy_influence.
+#       rigid), proportional to |trait_sum| * policy_persuasion.
 #     - Citizen policy aversion mu shifts toward the politician's
 #       apparent policy positions (targeted backlash), proportional to
-#       |trait_sum| * policy_influence * defensive_ratio.
+#       |trait_sum| * policy_persuasion * defensive_ratio.
 #
 # --- Politician-driven citizen trait shifts and spreads ---
 #
@@ -592,13 +592,56 @@ from settings import ScriptSettings
 from sim_control import SimControl
 from world import World
 from output import Hdf5, Xdmf
+from diagnostics import Diagnostics
 
 
-def campaign(sim_control, settings, world, hdf5):
+def campaign(sim_control, settings, world,
+             hdf5, diag, cycle):
+    """Execute one full campaign phase.
 
-    # One-time activities as the start of a campaign.
+    The campaign phase is where politicians
+    interact with citizens, trying to influence
+    their policy and trait positions. Citizens
+    also influence each other through community
+    norms. The campaign runs for
+    num_campaign_steps time steps.
 
-    # - Create the set of politicians who will be campaigning.
+    Each step follows a fixed sequence:
+    1. Compute zone averages (citizen stats per
+       geographic zone).
+    2. Politicians move to a new patch.
+    3. Politicians adapt their external positions
+       to their environment.
+    4. Citizens compute overlap integrals with
+       all politicians and zone averages.
+    5. Citizens prepare shift arrays (12 zero
+       arrays, 3 per Gaussian type).
+    6. Citizens accumulate politician influence
+       shifts (trait-gates-policy mechanics).
+    7. Citizens accumulate well-being engagement
+       shifts.
+    8. Citizens accumulate collective (community)
+       influence shifts.
+    9. Citizens apply all accumulated shifts in
+       one pass (two-phase design).
+    10. Citizens score candidates for voting.
+    11. Aggregate well-being to patch grid for
+        output.
+    12. Write data to HDF5.
+
+    Steps 6-8 are the "accumulation phase" and
+    step 9 is the "application phase" of the
+    two-phase accumulate-then-apply design
+    (DESIGN.md §8.6). The order of steps 6-8
+    does not matter because all three read from
+    the same unchanged Gaussian state.
+    """
+
+    # One-time activities at the start of a
+    #   campaign.
+
+    # - Create the set of politicians who will
+    #   be campaigning.
     world.repopulate_politicians(settings)
 
     # - Ask each citizen to clear their list of known politicians.
@@ -696,7 +739,15 @@ def campaign(sim_control, settings, world, hdf5):
 
         # Add current world properties to the HDF5 file.
         print (world.properties[0])
-        hdf5.add_dataset(world.properties[0], sim_control.curr_step)
+        hdf5.add_dataset(
+            world.properties[0],
+            sim_control.curr_step)
+
+        # Log diagnostics (no forces during
+        #   campaign).
+        diag.log_step(
+            sim_control.curr_step,
+            cycle, 0, world, None)
 
         # Increment the simulation timestep counter.
         sim_control.curr_step += 1
@@ -707,31 +758,305 @@ def campaign(sim_control, settings, world, hdf5):
 
 
 def vote(sim_control, world):
+    """Execute the election phase: citizens vote,
+    winners are determined, and margin of victory
+    is computed for each zone.
 
-    # - Citizens give votes to the politicians.
+    The election proceeds in two stages:
+
+    Stage 1 — Citizens cast votes:
+      Each citizen decides whether to participate
+      (based on their engagement-derived vote
+      probability), then casts one vote per zone
+      level for their highest-scoring candidate
+      (see citizen.vote_for_candidates()).
+
+    Stage 2 — Determine winners:
+      For each zone at each hierarchy level
+      (district, state, country), find the
+      politician with the most votes and compute
+      their margin of victory:
+
+        margin = (winner_votes - runner_up_votes)
+                 / total_votes
+
+      The margin of victory is a scalar in [0, 1]:
+        0 = tied or no votes cast
+        1 = unanimous (only one candidate, or all
+            votes went to the winner)
+
+      This margin feeds directly into the govern
+      phase via compute_political_power(): a
+      politician who won by a landslide has more
+      governing influence than one who barely won.
+
+    Edge cases:
+      - If no votes were cast in a zone (all
+        citizens too apathetic), margin = 0.
+      - If only one candidate runs in a zone,
+        runner_up_votes = 0 and margin = 1 (the
+        sole candidate has full mandate).
+      - The first politician in the zone's list
+        is used as the initial "top" candidate;
+        ties are broken by list order (the first
+        politician encountered with the top
+        score wins).
+    """
+
+    # Stage 1: Citizens cast votes.
     for citizen in world.citizens:
         citizen.vote_for_candidates(world)
 
-    # - Evaluate the votes and determine who was elected in each zone.
+    # Stage 2: Determine winners per zone.
     for zone_type in range(world.num_zone_types):
         for zone in world.zones[zone_type]:
-            top_vote_getter = zone.politician_list[0]
+
+            # Find the top vote getter, the
+            #   runner-up, and total votes.
+            top = zone.politician_list[0]
+            runner_up_votes = 0
+            total_votes = 0
             for politician in zone.politician_list:
-                if (politician.votes > top_vote_getter.votes):
-                    top_vote_getter = politician
+                total_votes += politician.votes
+                if (politician.votes
+                        > top.votes):
+                    # Current top becomes the
+                    #   new runner-up.
+                    runner_up_votes = top.votes
+                    top = politician
+                elif (politician is not top
+                        and politician.votes
+                            > runner_up_votes):
+                    runner_up_votes = (
+                        politician.votes)
 
-            # Now that the top vote getter for this zone has been determined,
-            #   we can assign that politician as the winner. We need to
-            #   make sure that the politician knows that they are elected
-            #   or not elected. We also need to make sure that the zone
-            #   knows the elected politician. This call will do both.
-            zone.set_elected_politician(top_vote_getter)
+            # Compute margin of victory.
+            if total_votes > 0:
+                top.margin_of_victory = (
+                    (top.votes - runner_up_votes)
+                    / total_votes)
+            else:
+                top.margin_of_victory = 0.0
+
+            # Assign the winner. This sets
+            #   politician.elected = True and
+            #   zone.elected_politician = top.
+            zone.set_elected_politician(top)
 
     return
 
 
-def govern(sim_control, world):
-    return
+def govern(sim_control, world, hdf5,
+           diag, cycle):
+    """Execute the govern phase: elected politicians
+    exert forces on the government's enacted policy.
+
+    The govern phase runs for num_govern_steps time
+    steps each cycle (DESIGN.md §7.5). During this
+    phase, the government's enacted policy Gaussians
+    (Pge) are pushed and pulled by the collective
+    forces of all elected politicians.
+
+    Overview of the mechanics:
+
+    1. POLITICAL POWER COMPUTATION (once per cycle):
+       Each elected politician's political_power is
+       computed from three factors:
+         - Zone population (larger constituency =
+           more power)
+         - Margin of victory (stronger mandate =
+           more power)
+         - Agreement/disagreement ratio (alignment
+           with constituents = more power)
+       See Politician.compute_political_power().
+
+    2. DIMENSION WEIGHTS (once per cycle):
+       Each politician's power is distributed across
+       policy dimensions based on their innate sigma
+       (narrow sigma = strong opinion = more weight
+       on that dimension).
+       See Politician.compute_dimension_weights().
+
+    3. FORCE ACCUMULATION (each govern step):
+       Two types of forces act on Pge each step:
+
+       Preference-attraction: pulls Pge.mu TOWARD
+         each politician's innate preference mu.
+         "Politicians push policy toward what they
+         believe in."
+
+       Aversion-repulsion: pushes Pge.mu AWAY FROM
+         each politician's innate aversion mu.
+         "Politicians push policy away from what
+         they oppose."
+
+       Both forces are direction-only: np.sign()
+       produces +1 or -1, so the force magnitude
+       per dimension per step is exactly the
+       weighted political power, regardless of how
+       far Pge is from the target. This prevents
+       extreme positions from generating extreme
+       forces and ensures gradual, bounded policy
+       movement.
+
+       The same force pattern applies to sigma:
+       politicians pull Pge.sigma toward their
+       innate preference sigma and away from their
+       innate aversion sigma.
+
+    4. WELL-BEING OUTPUT (each govern step):
+       After forces are applied, Pge's cached
+       integration variables are refreshed and
+       each citizen's well-being is recomputed
+       from the updated Pci-vs-Pge overlap (via
+       citizen.recompute_well_being()). The
+       per-patch average is written to HDF5 so
+       ParaView can show well-being evolving as
+       government policy shifts.
+
+    5. NATURAL SPREAD (once per cycle):
+       After all govern steps complete, Pge.sigma
+       broadens by spread_rate / sigma. This
+       represents institutional entropy: without
+       active political maintenance, precise
+       policies become vague over time. Narrow
+       policies (small sigma) spread faster.
+
+    6. REFRESH CACHED VARIABLES:
+       After spread, Pge's integration variables
+       are refreshed once more so the next
+       campaign phase's overlap integrals are
+       correct.
+    """
+    gov = world.government
+    Pge = gov.enacted_policy
+    n = world.num_policy_dims
+
+    # Zone averages are current from the last
+    #   campaign step. Compute political power
+    #   and dimension weights for each elected
+    #   politician (once per govern cycle).
+    elected = []
+    for zone_type in world.zones:
+        for zone in zone_type:
+            if hasattr(zone, 'elected_politician'):
+                pol = zone.elected_politician
+                pol.compute_political_power()
+                pol.compute_dimension_weights()
+                elected.append(pol)
+
+    # Normalize political power by total elected
+    #   population so that force magnitudes are
+    #   independent of world size
+    #   (DESIGN.md §7.5.1).
+    total_pop = sum(
+        pol.zone.curr_num_citizens
+        for pol in elected)
+    if total_pop > 0:
+        for pol in elected:
+            pol.political_power /= total_pop
+
+    # Each govern step: accumulate direction-only
+    #   forces from all elected politicians, then
+    #   apply to Pge.
+    for step in range(sim_control.num_govern_steps):
+
+        # Initialize per-step force accumulators.
+        pref_force_mu = np.zeros(n)
+        pref_force_sigma = np.zeros(n)
+        aver_force_mu = np.zeros(n)
+        aver_force_sigma = np.zeros(n)
+
+        for pol in elected:
+            pw = pol.political_power
+
+            # Preference attraction: pull Pge
+            #   toward politician's innate pref.
+            #   sign(target - current) gives the
+            #   direction; magnitude comes from
+            #   pw * pref_weight.
+            w_pref = pw * pol.pref_weight
+            pref_force_mu += w_pref * np.sign(
+                pol.innate_policy_pref.mu
+                - Pge.mu)
+            pref_force_sigma += w_pref * np.sign(
+                pol.innate_policy_pref.sigma
+                - Pge.sigma)
+
+            # Aversion repulsion: push Pge AWAY
+            #   from politician's innate aversion.
+            #   sign(current - aversion) pushes
+            #   Pge in the opposite direction from
+            #   the aversion target.
+            w_aver = pw * pol.aver_weight
+            aver_force_mu += w_aver * np.sign(
+                Pge.mu
+                - pol.innate_policy_aver.mu)
+            aver_force_sigma += w_aver * np.sign(
+                Pge.sigma
+                - pol.innate_policy_aver.sigma)
+
+        # Apply accumulated forces from all
+        #   politicians for this step.
+        Pge.mu += pref_force_mu + aver_force_mu
+        Pge.sigma += (
+            pref_force_sigma + aver_force_sigma)
+
+        # Clamp sigma to the floor to prevent
+        #   zero or negative values
+        #   (DESIGN.md §7.5.3).
+        np.maximum(
+            Pge.sigma, gov.sigma_floor,
+            out=Pge.sigma)
+
+        # Refresh cached integration variables so
+        #   that the Pci vs Pge overlap uses the
+        #   just-updated mu and sigma values.
+        Pge.update_integration_variables()
+
+        # Recompute citizen well-being from the
+        #   updated Pge and write to HDF5. This
+        #   lets ParaView show how well-being
+        #   evolves as government policy shifts.
+        for citizen in world.citizens:
+            citizen.recompute_well_being(world)
+        world.compute_patch_well_being()
+        hdf5.add_dataset(
+            world.properties[0],
+            sim_control.curr_step)
+
+        # Log diagnostics with the forces
+        #   that were applied this step and the
+        #   would-be spread for the current
+        #   sigma.
+        spread = (
+            gov.spread_rate / Pge.sigma)
+        diag.log_step(
+            sim_control.curr_step,
+            cycle, 1, world,
+            (pref_force_mu,
+             aver_force_mu,
+             pref_force_sigma,
+             aver_force_sigma,
+             spread))
+
+        sim_control.curr_step += 1
+
+    # Natural policy spread: applied once per
+    #   cycle. sigma += spread_rate / sigma means
+    #   narrow policies spread faster.
+    Pge.sigma += gov.spread_rate / Pge.sigma
+
+    # Clamp sigma to the floor after spread
+    #   (DESIGN.md §7.5.4).
+    np.maximum(
+        Pge.sigma, gov.sigma_floor,
+        out=Pge.sigma)
+
+    # Refresh cached integration variables so
+    #   the next campaign's overlap integrals
+    #   use the updated Pge (after spread).
+    Pge.update_integration_variables()
 
 
 def main():
@@ -755,27 +1080,51 @@ def main():
     world.populate(settings)
     print ("World Populated")
 
-    # Once the simulation is ready to start executing, we can create and
-    #   print the xdmf xml file and create the hdf5 data file.
+    # Once the simulation is ready to start executing,
+    #   compute the data range for visualization and
+    #   create the hdf5 data file. The xdmf file is
+    #   written after the simulation completes so that
+    #   it references only the HDF5 datasets that were
+    #   actually created (handling early termination
+    #   and the govern-phase gap correctly).
+    sim_control.compute_data_range(settings, world)
+    print ("Data Range Computed")
     xdmf = Xdmf(settings)
-    print ("XDMF Contents Defined")
-    xdmf.print_xdmf_xml(settings, sim_control, world)
-    print ("XDMF File Written")
+    print ("XDMF Initialized")
     hdf5 = Hdf5(settings, world)
     print ("HDF5 File Created")
 
-    # Start executing the main activities of the program.
+    # Select sample citizens for diagnostic
+    #   tracking: first, middle, and last in
+    #   the global list (geographic spread).
+    n_cit = len(world.citizens)
+    sample_idx = [
+        0, n_cit // 2, n_cit - 1]
+    diag = Diagnostics(
+        settings, world, sample_idx)
+    print ("Diagnostics Initialized")
+
+    # Start executing the main activities of
+    #   the program.
     for cycle in range(sim_control.num_cycles):
         print ("cycle = ", cycle)
-        campaign(sim_control, settings, world, hdf5)
+        campaign(sim_control, settings,
+                 world, hdf5, diag, cycle)
 
         vote(sim_control, world)
 
-        govern(sim_control, world)
+        govern(sim_control, world, hdf5,
+               diag, cycle)
 
-
-    # Finalize the program activities and quit.
+    # Finalize: write XDMF using the actual
+    #   number of steps completed, then close
+    #   HDF5 and diagnostic files.
+    xdmf.print_xdmf_xml(
+        settings, sim_control.curr_step,
+        world)
+    print ("XDMF File Written")
     hdf5.close()
+    diag.close()
 
 
 if __name__ == '__main__':

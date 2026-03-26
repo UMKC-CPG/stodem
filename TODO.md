@@ -2,15 +2,15 @@
 
 ## Summary
 
-The simulation framework is well-structured and the
-core data model (Gaussians, zones, patches, citizens,
-politicians, government) is largely in place. The
-campaign loop skeleton exists with full influence shift
-mechanics (accumulation, trait-gates-policy, engagement
-decay, application) and data output (HDF5/XDMF) works.
-The governing phase is designed (DESIGN.md §7.5) but
-unimplemented, and several agent strategies remain
-stubs.
+The simulation is fully implemented through the
+campaign → vote → govern loop. All core mechanics are
+in place: Gaussian influence physics, trait-gates-
+policy, engagement decay, political power, govern-phase
+force application, well-being feedback, and diagnostic
+output. The govern-phase force scale has been
+stabilized via population normalization and a bounded
+mandate formula (TODO #33, #34); Pge sigma is
+protected by a floor (TODO #32).
 
 This document tracks concrete implementation tasks.
 Architectural design and mathematical specifications
@@ -49,6 +49,18 @@ here for reference:
 | 22 | Engagement decay not applied | `citizen.py`, `stodem.in.xml` | Implemented as part of #8. Inside `apply_influence_shifts()`, each Gaussian type applies `alpha *= (1 + engagement_decay_rate)` (preference: `alpha = Im(theta)`; aversion: `alpha = pi - Im(theta)`) then clamps to `[0, pi/2]` before writing back to theta. A perfectly engaged citizen (alpha=0) experiences zero decay; disengagement is self-reinforcing. `engagement_decay_rate=0.01` added to all XML `<citizens>` blocks and `__init__`. Govern-phase decay will be added alongside TODO #5. |
 | 7 | `Politician.persuade()` stub, never called | `politician.py` | Removed. All citizen Gaussian modifications are computed from the citizen side via `build_response_to_politician_influence()`. No politician-side entry point needed. |
 | 10 | Politician move strategies 1+ unimplemented | `politician.py` | Strategy 1: teleport to highest-population patch and stay. Strategy 2: cycle through bottom-half patches by population (round-robin). |
+| 31 | `policy_influence`, `trait_influence`, `pander` obsolete | `politician.py`, `stodem.py`, `stodem.in.xml` | Removed all three parameters from `reset_to_input()` and all three XML files. Updated stale `stodem.py` design comments to reference `policy_persuasion` instead. |
+| 13 | `compute_data_range()` never called | `sim_control.py`, `stodem.py` | Called in `main()` after `world.populate()`, grouped with XDMF/HDF5 setup. Results stored in `world.policy_limits` and `world.trait_limits` for future visualization use. |
+| 17 | Mutable class-level lists/variables | `world.py`, `sim_control.py`, `output.py`, `government.py` | Moved all mutable class-level declarations into `__init__()` as instance variables. Changed `World.xxx`, `SimControl.xxx`, `Hdf5.xxx`, `Xdmf.xxx` references to `self.xxx` throughout. |
+| 18 | XDMF/HDF5 step count mismatch | `output.py`, `stodem.py` | XDMF is now written after the simulation completes using `sim_control.curr_step` (actual steps completed) instead of `total_num_steps` (planned). Handles early termination and govern-phase gaps. |
+| 29 | Configurable initial theta distribution | `gaussian.py`, `citizen.py`, `politician.py` | Added `sample_theta()` helper in `gaussian.py`. Citizen and politician Gaussian initialization now reads `*_orien_stddev` XML params; numeric values sample Im(theta) from a clamped normal distribution, non-numeric values (e.g. "imaginary") keep the hardcoded default. |
+| 10b | Politician adapt strategies 1+ unimplemented | `politician.py` | Strategy 1: pander toward zone-average citizen preferences using `policy_lie`/`trait_lie` blend. Strategy 2: shift away from zone-average citizen aversions. Both start from innate positions via `_copy_innate_to_external()`. |
+| 11 | `campaign_strategy` unused | `politician.py`, `stodem.in.xml` | Removed. Move and adapt strategies already cover campaign behavior. Removed `self.campaign_strategy` and `cumul_campaign_strategy_probs` from all XML files and DESIGN.md. |
+| 5 | Implement `govern()` (5a–5e) | `stodem.py`, `politician.py`, `government.py`, `stodem.in.xml` | 5a: `vote()` now computes `margin_of_victory` for each winner. 5b: `Politician.compute_political_power()` from zone pop, margin, agreement/disagreement ratio. 5c: `Politician.compute_dimension_weights()` from innate sigma inverse. 5d: `govern()` accumulates preference-attraction and aversion-repulsion forces on Pge each step. 5e: Natural spread `sigma += spread_rate/sigma` once per cycle; `spread_rate` added to `<government>` XML and `Government.__init__`. |
+| 9 | `build_response_to_well_being()` downstream effects | `citizen.py` | Well-being now drives engagement: `\|well_being\|` shifts all four Gaussian types toward their engaged poles via `_well_being_to_engagement()`. Encapsulated so the richer model (resource, resentment, etc.) can replace the mapping independently. |
+| 32 | `Pge.sigma` can go negative under politician forces | `government.py`, `stodem.py` | Added `sigma_floor` to `Government.__init__()` (reads from `<citizens>` XML, same floor as citizen Gaussians). `np.maximum(..., gov.sigma_floor)` applied after each govern step's force accumulation and after the natural spread. Documented in DESIGN.md §7.5.3–§7.5.4. |
+| 33 | `political_power` unscaled — proportional to raw zone population | `stodem.py` | In `govern()`, after computing all elected politicians' power, divide each by `total_pop = sum(zone.curr_num_citizens for pol in elected)`. Forces are now dimensionless and world-size independent; relative power distribution is preserved. Documented in DESIGN.md §7.5.1. |
+| 34 | Agreement/disagreement ratio unbounded (explodes when `\|disagreement\|` → 0) | `politician.py` | Replaced `agreement / (\|disagreement\| + eps)` with `max(0, agreement + disagreement)`. Since cross-type integrals are non-positive by the theta sign convention, this equals `agreement - \|disagreement\|`, bounded to `[-(N_policy+N_trait), +(N_policy+N_trait)]`. Clamped to 0 so politicians with negative net alignment have zero governing power. Documented in DESIGN.md §7.5.1. |
 
 ---
 
@@ -58,220 +70,9 @@ No active bugs. See Resolved Items above.
 
 ---
 
-## Core Simulation Physics
+## All Tasks Resolved
 
-These tasks implement the interaction mechanics needed
-for meaningful simulation results. See DESIGN.md §8
-for the full interaction physics specification.
+All implementation tasks have been completed. See the
+Resolved Items table above for details on each item.
 
-### 5. Implement `govern()` — `stodem.py`, `government.py`, `politician.py`
 
-`govern()` returns immediately with no implementation.
-Per DESIGN.md §7.5, it should run for
-`num_govern_steps` time steps each cycle. Sub-tasks:
-
-#### 5a. Compute `margin_of_victory` — `stodem.py`
-
-After each election in `vote()`, compute each winning
-politician's normalized margin over the next-closest
-rival and store it as `politician.margin_of_victory`.
-Currently the vote phase only identifies the top
-vote-getter; it does not record the margin. This value
-is needed by the political power calculation (§7.5.1).
-
-#### 5b. Compute `political_power` — `politician.py` or `government.py`
-
-For each elected politician, compute the scalar
-`political_power` from three components (§7.5.1):
-
-1. Zone population (`zone.curr_num_citizens`).
-2. Margin of victory (from 5a).
-3. Agreement/disagreement ratio using zone citizen
-   averages and the politician's external positions:
-   ```
-   agreement = I(avg_Pcp, Ppp) + I(avg_Pca, Ppa)
-             + I(avg_Tcp, Tpx)
-   disagreement = I(avg_Pca, Ppp) + I(avg_Pcp, Ppa)
-   political_power = zone_pop * margin
-                   * (agreement
-                      / (|disagreement| + eps))
-   ```
-
-Zone averages must be recomputed (or carried forward
-from the last campaign step) before this calculation.
-
-#### 5c. Compute per-dimension weights — `politician.py` or `government.py`
-
-For each elected politician, compute preference and
-aversion dimension weights from innate sigma (§7.5.2):
-```
-pref_weight_n = (1/sigma_innate_pref_n)
-              / sum(1/sigma_innate_pref)
-aver_weight_n = (1/sigma_innate_aver_n)
-              / sum(1/sigma_innate_aver)
-```
-
-#### 5d. Apply forces to `Pge` — `government.py`, `stodem.py`
-
-Each govern step, accumulate direction-only forces
-from all elected politicians on each policy dimension
-for both `Pge.mu` and `Pge.sigma` (§7.5.3):
-```
-w = political_power * dim_weight
-force += w * sign(innate.param - Pge.param)
-```
-Preference forces pull `Pge` toward innate pref;
-aversion forces push `Pge` away from innate aver.
-Apply forces after all politicians are accumulated.
-
-#### 5e. Apply natural policy spread — `government.py`, `stodem.py`
-
-Once per govern cycle (not per step), broaden
-`Pge.sigma` (§7.5.4):
-```
-Pge.sigma_n += spread_rate / Pge.sigma_n
-```
-
-New parameter needed: `spread_rate` (small positive
-float, added to `<government>` in XML and to
-`Government.__init__`).
-
-### 9. Implement `build_response_to_well_being()` downstream effects — `citizen.py`
-
-The method currently only computes
-`self.well_being = sum(self.Pci_Pge_ol[0])`. Per
-DESIGN.md §7.5.5 and §8.5, well-being should modulate
-citizen engagement (orientation shifts) and potentially
-policy position shifts.
-
-**Decision**: Use the simple overlap-based `well_being`
-for downstream engagement modulation. Implement so the
-richer model from DESIGN.md §8.5 can slot in without
-restructuring call sites. Specifically: encapsulate the
-well-being→engagement mapping in a method so it can be
-replaced independently of the overlap computation.
-
----
-
-## Feature Completion
-
-### ~~10. Implement politician move strategies 1+ — `politician.py`~~ ✓ DONE
-
-All three move strategies are now implemented:
-- Strategy 0: Random patch within zone (unchanged).
-- Strategy 1: Teleport to highest-population patch
-  in zone and stay there.
-- Strategy 2: Cycle through low-to-middle population
-  patches (bottom half by population, round-robin).
-
-### 10b. Implement politician adapt strategies 1+ — `politician.py`
-
-Only strategy 0 (present innate positions unchanged)
-is coded. Strategies 1+ — including misrepresentation
-via `policy_lie` and `trait_lie` — are unimplemented
-despite the instance variables being set in
-`reset_to_input()`.
-
-**Action**: Define and implement strategies 1+. See
-DESIGN.md §6.2 for the existing parameters.
-
-### 11. Use `campaign_strategy` — `politician.py`
-
-`self.campaign_strategy` is set in `__init__` via
-`select_strategy()` but is never referenced anywhere.
-
-**Action**: Define what campaign strategies control
-and implement their effects, or remove the parameter
-if not needed.
-
-### 12. (Removed — primary election deferred)
-
-### 13. Call `compute_data_range()` — `sim_control.py`, `stodem.py`
-
-`compute_data_range()` computes policy and trait axis
-limits for output but is never called. It is fully
-implemented.
-
-⚠️ **TODO QUESTION**: Should this be called at
-simulation start for visualization setup, or is it
-deferred until needed?
-
----
-
-## Robustness / Architecture
-
-### ~~16. Clarify overlap integral normalization — `gaussian.py`~~ ✓ DONE
-
-Normalized inside `Gaussian.integral()`. Each Gaussian caches
-`self_norm = (π·σ²)^0.75 · |cos θ|` in
-`update_integration_variables()`; `integral()` divides raw
-by `self_norm₁ · self_norm₂`. See DESIGN.md §4.2.
-
-### 17. Move mutable class-level lists to `__init__()` — `world.py`
-
-`World.zone_types`, `World.zones`, `World.citizens`,
-`World.politicians`, and `World.properties` are
-class-level mutable lists. If `World` is ever
-instantiated more than once (tests, parameter sweeps),
-these would accumulate across instances. The same
-pattern exists in `SimControl` and `Hdf5`.
-
-**Action**: Move list declarations into `__init__()`.
-
-### 18. Address XDMF/HDF5 step count mismatch — `output.py`, `stodem.py`
-
-`Xdmf.print_xdmf_xml()` writes entries for all
-`total_num_steps` up front, but HDF5 datasets are
-created incrementally. If the simulation terminates
-early, the XDMF references nonexistent HDF5 datasets.
-
-**Action**: Either write XDMF incrementally alongside
-HDF5, or write XDMF only after simulation completes.
-
-### 31. Remove `policy_influence`, `trait_influence`, `pander` — `politician.py`, `stodem.py`, `stodem.in.xml`
-
-These parameters are superseded by the new govern-phase
-design (DESIGN.md §7.5). `policy_influence` and
-`trait_influence` are replaced by the computed
-`political_power` scalar. `pander` is removed; the
-blending concept may return as a future extension
-(§7.5.3) but will use a different, more abstract
-parameter name.
-
-**Code changes needed**:
-
-- `politician.py`: Remove `self.policy_influence`,
-  `self.trait_influence`, and `self.pander`
-  initialization from `reset_to_input()`. Remove the
-  stale comment (lines 142–144) referencing
-  `policy_influence` and `trait_influence`.
-- `stodem.py`: Remove stale comment block (around
-  line 376) that references `policy_influence`.
-- `stodem.in.xml` (all three copies): Remove
-  `<policy_influence_stddev>`,
-  `<trait_influence_stddev>`, and `<pander_stddev>`
-  from `<politicians>`.
-
-### 29. Implement configurable initial theta distribution — `citizen.py`, `politician.py`, `stodem.in.xml`
-
-Theta (orientation/engagement) is currently hardcoded
-at initialization: preferences at `1j`, aversions at
-`(pi-1)j`. All agents in a run start with identical
-engagement magnitude. A more realistic initialization
-would draw Im(theta) from a configurable distribution,
-producing a population with varied initial engagement
-levels.
-
-The `*_orien_stddev` XML parameters
-(`policy_pref_orien_stddev`, `policy_aver_orien_stddev`,
-`trait_pref_orien_stddev`, `trait_aver_orien_stddev` in
-`<citizens>`, and analogues in `<politicians>`) are
-already present in all XML files and reserved for this
-purpose. They are not yet read by the code. See
-DESIGN.md §4.1 for the design rationale.
-
-**Action**: When implementing, read the `*_orien_stddev`
-parameters and use them to sample Im(theta) from a
-truncated normal distribution with the hardcoded value
-as the mean and the parameter as the stddev, clamped to
-[0, π/2) for preferences and (π/2, π] for aversions.

@@ -119,15 +119,8 @@ Key sections:
 
 ## Known Issues
 
-See `TODO.md` for a comprehensive list. Key items:
-- `govern()` function is a stub (TODO #5, with
-  sub-tasks 5a–5e). Design is complete in §7.5.
-- `build_response_to_well_being()` only computes
-  well-being, no downstream engagement effects
-  (TODO #9)
-- `policy_influence`, `trait_influence`, `pander`
-  are obsolete and should be removed (TODO #31)
+See `TODO.md` for resolved items. All previously
+active tasks have been implemented. Remaining
+deferred item:
 - Primary campaign/vote phases not implemented
-  (TODO #12)
-- Open design questions in `DESIGN.md` §8.5
-  (well-being/resource/resentment model)
+  (TODO #12 — deferred)

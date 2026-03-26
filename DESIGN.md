@@ -410,10 +410,11 @@ distribution parameters in the input XML:
     (sorted by population, ascending) in round-robin
     order, visiting low-to-middle population areas.
 - `adapt_strategy`: How the politician sets apparent
-  positions. Only strategy 0 (present innate positions
-  unchanged) is implemented (TODO #10b).
-- `campaign_strategy`: Selected but not yet used
-  anywhere (TODO #11).
+  positions. Strategy 0: honest (innate unchanged).
+  Strategy 1: pander toward zone-average citizen
+  preferences using `policy_lie`/`trait_lie`.
+  Strategy 2: shift away from zone-average citizen
+  aversions.
 
 ### 6.3 Government
 
@@ -421,13 +422,10 @@ A single `Government` instance holds:
 
 - `enacted_policy`: Gaussian for each policy dimension
   representing current government policy. Initialized
-  randomly and currently static (govern phase is
-  unimplemented — see §7.5 for design, TODO #5 for
-  implementation). Once the govern phase is active,
-  `Pge.mu` and `Pge.sigma` shift each step under
-  politician forces (§7.5.3), and `Pge.sigma`
-  naturally broadens each cycle via the policy spread
-  mechanism (§7.5.4).
+  randomly. During the govern phase, `Pge.mu` and
+  `Pge.sigma` shift each step under politician forces
+  (§7.5.3), and `Pge.sigma` naturally broadens each
+  cycle via the policy spread mechanism (§7.5.4).
 
 ---
 
@@ -459,7 +457,7 @@ consists of three phases:
 for cycle in num_cycles:
     campaign(...)     # Multi-step campaigning phase
     vote(...)         # Single-step election
-    govern(...)       # Multi-step governing phase (stub)
+    govern(...)       # Multi-step governing phase
 ```
 
 ### 7.3 Campaign Phase (Multi-Step)
@@ -546,9 +544,8 @@ The vote phase runs once per cycle after the campaign:
 ### 7.5 Govern Phase
 
 The govern phase runs for `num_govern_steps` time
-steps after each election. Currently a stub that
-returns immediately (TODO #5). The design below
-describes the intended mechanics.
+steps after each election. The design below
+describes the implemented mechanics.
 
 The govern phase focuses on how elected politicians
 move enacted government policy (`Pge`). Each
@@ -579,41 +576,99 @@ the winner's vote count and the next-closest rival's
 vote count, normalized by the total votes cast in
 the zone.
 
-**Component 3 — Agreement/disagreement ratio**: The
-ratio of citizen-average agreement integrals to
-citizen-average disagreement integrals, using zone
-citizen averages and the politician's external
-(apparent) positions:
+**Component 3 — Mandate (net alignment)**:
+The net alignment between a politician's apparent
+positions and what citizens want, using zone citizen
+averages and the politician's external positions:
 
 ```
-agreement = I(avg_Pcp, Ppp) + I(avg_Pca, Ppa)
-          + I(avg_Tcp, Tpx)
+agreement    = I(avg_Pcp, Ppp) + I(avg_Pca, Ppa)
+             + I(avg_Tcp, Tpx)
 disagreement = I(avg_Pca, Ppp) + I(avg_Pcp, Ppa)
+mandate      = agreement + disagreement
 ```
 
-A politician whose apparent positions align well with
-citizen preferences (high agreement) and poorly with
-citizen aversions (low disagreement) has more
-political power. Because this uses external
-positions, a politician who lied effectively during
-the campaign may have inflated agreement ratios
-relative to their true innate positions.
+The theta sign convention (§3) makes same-type
+integrals non-negative and cross-type integrals
+non-positive. Therefore `agreement ≥ 0` and
+`disagreement ≤ 0`, so `mandate = agreement -
+|disagreement|`. Mandate increases as the
+politician's apparent positions align with citizen
+preferences and decreases as they clash with citizen
+aversions. Mandate is bounded because each
+normalized integral is in `[-1, +1]`, so
+`mandate ∈ [-(N_policy + N_trait),
+             +(N_policy + N_trait)]`.
 
-**Combining the components**: A candidate formulation:
+A politician whose apparent positions strongly
+align with citizen preferences and actively avoid
+their aversions has a large positive mandate. One
+whose positions clash with citizen aversions has a
+reduced or negative mandate. Because this uses
+external positions, a politician who lied
+effectively during the campaign may have an
+inflated mandate relative to their true innate
+positions.
+
+**Combining the components**:
 
 ```
 political_power = zone_population
                 * margin_of_victory
-                * (agreement
-                   / (|disagreement| + eps))
+                * max(0, mandate)
 ```
 
-The `eps` prevents division by zero. The product form
+The `max(0, ...)` clamp keeps political power
+non-negative. A politician with negative mandate
+(cross-type clash exceeds same-type agreement) has
+zero governing power — their electoral win does not
+translate to policy influence. The product form
 means each component scales the others
 multiplicatively.
 
-**Future extensions**: The political power computation
-may later incorporate:
+**Population normalization**: The raw
+`political_power` values are proportional to zone
+population (which ranges from tens to thousands of
+citizens depending on zone level). If these raw
+values are applied directly as force magnitudes on
+`Pge`, the forces overwhelm the policy-space scale —
+a single govern step can shift `Pge.mu` by hundreds
+of units when the typical policy position is O(1).
+
+To decouple force magnitude from world size, the
+govern phase normalizes each politician's power by
+the total population represented by all elected
+politicians:
+
+```
+total_pop = sum(zone_population_p) for all elected p
+political_power_p /= total_pop
+```
+
+After normalization, the sum of all raw powers
+(before margin and ratio scaling) equals 1.0. This
+makes the force magnitudes dimensionless and
+independent of world size — doubling the number of
+citizens does not double the force on `Pge`. The
+relative distribution of power among politicians is
+preserved: a state-level politician still has more
+power than a district-level one, but the absolute
+scale is bounded.
+
+Note that zone populations can overlap in the
+hierarchical zone structure (a citizen in a district
+is also in a state). The `total_pop` sum counts
+each elected politician's zone population, so a
+citizen may be counted more than once if politicians
+from multiple zone levels are elected. This is
+intentional — it means higher-zone politicians share
+their larger population weight with other elected
+politicians in the normalization pool, preventing
+a single country-level politician from dominating
+all district-level ones by raw population alone.
+
+**Future extensions**: The political power
+computation may later incorporate:
 - An incumbency factor.
 - Change-desire integrals: `I(avg_Pca, Pge)` added
   to the agreement numerator and `I(avg_Pcp, Pge)`
@@ -708,6 +763,23 @@ Politicians push both `Pge.mu` (position) and
 so they shape both where policy sits and how sharply
 defined it is.
 
+**Pge sigma floor**: After forces are applied each
+govern step, `Pge.sigma` is clamped to a minimum
+value (`sigma_floor`) to prevent sigma from reaching
+zero or going negative. This is the same floor used
+for citizen Gaussians (§8.6.8). Without this floor,
+opposing sigma forces can drive `Pge.sigma` below
+zero, which is physically meaningless for a Gaussian
+width and causes cascading numerical failures
+(negative alpha, sign-flipping in subsequent steps).
+The floor is applied element-wise after each step's
+force accumulation and again after the natural spread
+(§7.5.4):
+
+```
+Pge.sigma_n = max(Pge.sigma_n, sigma_floor)
+```
+
 **Future extension — governance rate**: A global
 `governance_rate` parameter may be introduced to
 provide institutional inertia, bounding how fast
@@ -748,7 +820,9 @@ policy rather than to agent orientation.
 The natural spread is applied once per govern cycle
 (not per govern step), using a small `spread_rate`
 parameter. The `spread_rate` is stored as a variable
-so it can be made dynamic in the future.
+so it can be made dynamic in the future. After the
+spread, `Pge.sigma` is clamped to `sigma_floor`
+(same floor as in §7.5.3).
 
 The spread creates a natural tension: politicians
 must continuously exert force to keep enacted policy
@@ -1527,8 +1601,14 @@ adapt, and campaign strategies.
 
 ### government
 
-Standard deviations for initializing enacted policy position
-and spread.
+Standard deviations for initializing enacted policy
+position and spread. The `sigma_floor` parameter is
+shared with the citizen section — it is the same
+minimum sigma used for all Gaussians in the
+simulation. In the govern phase, it prevents
+`Pge.sigma` from reaching zero or going negative
+under politician forces (§7.5.3) and after natural
+spread (§7.5.4).
 
 ---
 
@@ -1586,24 +1666,20 @@ expansion.
 
 ## 15. Known Architectural Issues
 
-These issues are tracked in `TODO.md`. Brief summary
-with cross-references:
+No open architectural issues. All previously tracked
+issues (TODO #8, #17, #18, #19, #20 and others) are
+resolved — see `TODO.md` Resolved Items.
 
-- **Influence shifts never applied** — Campaign
-  interactions currently have no lasting effect on
-  citizen state (TODO #8). Accumulation code also has
-  bugs (TODO #19, #20).
-- **Class-level mutable state** — `World`, `SimControl`,
-  `Hdf5` use class-level lists that would cause
-  cross-instance contamination (TODO #17).
-- **XDMF/HDF5 mismatch** — XDMF written eagerly for
-  all steps; early termination leaves dangling
-  references (TODO #18).
-- **Settings via deep dictionary indexing** — Parameters
-  extracted as
-  `settings.infile_dict[1]["section"]["param"]`
-  throughout the codebase rather than named attributes.
-  Not yet tracked as a TODO item.
+The one remaining known limitation is that the govern
+phase forces still have no hard cap on the per-step
+movement of `Pge` (a `governance_rate` parameter is
+described as a future extension in §7.5.3). The
+current combination of population normalization and
+bounded mandate (§7.5.1) keeps forces in the O(10^-2)
+range for typical world configurations, but very
+large worlds or extreme margin/mandate values could
+still produce large per-step shifts. This is noted
+as a future parameter rather than an active bug.
 
 ---
 
