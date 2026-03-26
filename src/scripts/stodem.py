@@ -591,12 +591,14 @@ import numpy as np
 from settings import ScriptSettings
 from sim_control import SimControl
 from world import World
-from output import Hdf5, Xdmf
+from output import (Hdf5, Xdmf, GlyphHdf5,
+                    GlyphXdmf,
+                    write_paraview_script)
 from diagnostics import Diagnostics
 
 
 def campaign(sim_control, settings, world,
-             hdf5, diag, cycle):
+             hdf5, glyph_hdf5, diag, cycle):
     """Execute one full campaign phase.
 
     The campaign phase is where politicians
@@ -744,6 +746,8 @@ def campaign(sim_control, settings, world,
         for p in world.properties:
             hdf5.add_dataset(
                 p, sim_control.curr_step)
+        glyph_hdf5.add_step(
+            world, sim_control.curr_step)
 
         # Log diagnostics (no forces during
         #   campaign).
@@ -849,7 +853,7 @@ def vote(sim_control, world):
 
 
 def govern(sim_control, world, hdf5,
-           diag, cycle):
+           glyph_hdf5, diag, cycle):
     """Execute the govern phase: elected politicians
     exert forces on the government's enacted policy.
 
@@ -1028,6 +1032,8 @@ def govern(sim_control, world, hdf5,
         for p in world.properties:
             hdf5.add_dataset(
                 p, sim_control.curr_step)
+        glyph_hdf5.add_step(
+            world, sim_control.curr_step)
 
         # Log diagnostics with the forces
         #   that were applied this step and the
@@ -1097,6 +1103,10 @@ def main():
     print ("XDMF Initialized")
     hdf5 = Hdf5(settings, world)
     print ("HDF5 File Created")
+    glyph_xdmf = GlyphXdmf(settings)
+    print ("Glyph XDMF Initialized")
+    glyph_hdf5 = GlyphHdf5(settings, world)
+    print ("Glyph HDF5 File Created")
 
     # Select sample citizens for diagnostic
     #   tracking: first, middle, and last in
@@ -1113,12 +1123,13 @@ def main():
     for cycle in range(sim_control.num_cycles):
         print ("cycle = ", cycle)
         campaign(sim_control, settings,
-                 world, hdf5, diag, cycle)
+                 world, hdf5, glyph_hdf5,
+                 diag, cycle)
 
         vote(sim_control, world)
 
         govern(sim_control, world, hdf5,
-               diag, cycle)
+               glyph_hdf5, diag, cycle)
 
     # Finalize: write XDMF using the actual
     #   number of steps completed, then close
@@ -1127,7 +1138,14 @@ def main():
         settings, sim_control.curr_step,
         world)
     print ("XDMF File Written")
+    glyph_xdmf.write(
+        settings, sim_control.curr_step,
+        world, glyph_hdf5)
+    print ("Glyph XDMF File Written")
+    write_paraview_script(settings, world)
+    print ("ParaView Script Written")
     hdf5.close()
+    glyph_hdf5.close()
     diag.close()
 
 
