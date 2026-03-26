@@ -1726,10 +1726,10 @@ The `GlyphHdf5` class manages this file.
 parameter to a scalar field on the patch grid, requiring
 separate colour maps for mu, sigma, and theta. The glyph
 output compresses all three parameters of a Gaussian into
-a single arrow per patch: colour encodes mu, length encodes
-certainty, and opacity encodes engagement. A preference/
-aversion pair is visually separated by a ±0.25 patch-unit
-Z offset, making both types readable simultaneously.
+a single arrow per patch: colour encodes mu and engagement,
+length encodes certainty. A preference/aversion pair is
+visually separated by a ±0.25 patch-unit Z offset, making
+both types readable simultaneously.
 
 **Point layout**: Patch (i, j) maps to linear index
 `i*NY + j` (C-order ravel). For each Z level,
@@ -1745,13 +1745,14 @@ initialization (shared by all blocks and all time steps):
 
 **Glyph blocks**: Each Gaussian type is a named HDF5 group.
 Per-step data lives in sub-groups `Step0`, `Step1`, etc.
-Three arrays per dimension `d`:
+Four arrays per dimension `d`:
 
 | Array | Meaning |
 |---|---|
 | `mu_d{d}` | Patch-averaged Gaussian centre |
 | `inv_sigma_d{d}` | `sigma_ref / sigma` — larger = sharper/more certain |
 | `cos_theta_d{d}` | `|cos(theta)|` in [0,1] — larger = more engaged |
+| `color_d{d}` | Pre-computed float32 RGB `(N,3)` — see §12.5 |
 
 `sigma_ref` equals the `*_stddev_stddev` XML parameter used
 to initialize that Gaussian type, so `inv_sigma ≈ 1.0` for a
@@ -1783,8 +1784,8 @@ values are scalars (one per policy dim) replicated to all
 **Empty-patch handling**: Empty patches have `sigma=0` and
 `cos_theta=0` from the averaging step. `inv_sigma` is clipped
 to a minimum of `1e-9` to avoid division by zero; the
-`cos_theta=0` ensures these glyphs render as invisible
-(opacity=0) regardless of glyph size.
+`cos_theta=0` forces `color_d{d}` saturation to zero (grey)
+for these points regardless of glyph size.
 
 **Output cadence**: Glyph data is written at the same
 frequency as the regular HDF5 data — every campaign step and
@@ -1842,10 +1843,15 @@ static file without additional configuration steps.
   transform, not from a data vector.
 - Arrow length: scaled by `inv_sigma_d{DIM}` (longer =
   more certain).
-- Arrow colour: mapped from `mu_d{DIM}` using the 'Cool to
-  Warm' colour map.
-- Arrow opacity: mapped from `cos_theta_d{DIM}` (fully opaque
-  = fully engaged; invisible = fully apathetic).
+- Arrow colour: pre-computed float32 RGB stored in
+  `color_d{DIM}` (one `(N,3)` array per block per step).
+  Hue encodes mu via a sigmoid: `t = 1/(1+exp(-mu))`;
+  t < 0.5 → blue (negative), t > 0.5 → red (positive),
+  t = 0.5 → white (neutral/zero). Saturation encodes
+  engagement: `sat = |cos_theta| * (2|t-0.5|)` — vivid
+  when the agent is both engaged and opinionated, grey when
+  apathetic or centrist. Value = 1.0 always. Rendered via
+  `rep.MapScalars = 0` (direct RGB, no LUT applied).
 
 **User-adjustable parameters** at the top of the generated
 script:

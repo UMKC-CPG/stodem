@@ -370,6 +370,79 @@ class Xdmf():
 # spatial layout matches citizens and politicians.
 
 
+def _hsv_to_rgb_arr(h, s, v):
+    """Vectorized HSV -> float32 RGB in [0, 1].
+
+    All inputs are 1-D float32 arrays of equal
+    length with values in [0, 1].  Returns a
+    float32 array of shape (N, 3).
+    """
+    h6 = h * 6.0
+    i  = np.floor(h6).astype(np.int32) % 6
+    f  = (h6 - np.floor(h6)).astype(np.float32)
+    p  = v * (1.0 - s)
+    q  = v * (1.0 - f * s)
+    t  = v * (1.0 - (1.0 - f) * s)
+    N  = len(h)
+    r = np.empty(N, dtype=np.float32)
+    g = np.empty(N, dtype=np.float32)
+    b = np.empty(N, dtype=np.float32)
+    for case, (rv, gv, bv) in enumerate([
+            (v, t, p), (q, v, p),
+            (p, v, t), (p, q, v),
+            (t, p, v), (v, p, q)]):
+        m = (i == case)
+        r[m], g[m], b[m] = rv[m], gv[m], bv[m]
+    return np.stack([r, g, b], axis=1)
+
+
+def _mu_to_rgb(mu, cos_theta):
+    """Per-point float32 RGB from mu and cos(theta).
+
+    Encodes policy/trait position as hue and
+    engagement as saturation.  Brightness is
+    always 1.0 so all agents remain visible.
+
+    Hue mapping (Cool-to-Warm two-pole):
+      mu << 0  ->  blue  (H = 0.667)
+      mu  = 0  ->  white (S = 0, neutral)
+      mu >> 0  ->  red   (H = 0.0)
+    Position is normalised by sigmoid so mu = 0
+    is always the white neutral point regardless
+    of the distribution scale.
+
+    Saturation = |cos_theta| in [0, 1]:
+      0  ->  grey   (fully apathetic)
+      1  ->  vivid  (fully engaged)
+
+    Parameters
+    ----------
+    mu        : float32 array, shape (N,)
+    cos_theta : float32 array, shape (N,)
+
+    Returns
+    -------
+    float32 array, shape (N, 3), values in [0, 1]
+    """
+    ct = np.abs(cos_theta.astype(np.float32))
+    # Sigmoid normalisation: mu=0 -> t=0.5 (white)
+    t = (1.0 / (
+        1.0 + np.exp(-mu.astype(np.float64)))
+        ).astype(np.float32)
+    # Hue: blue pole at t<0.5, red pole at t>0.5
+    h = np.where(t < 0.5,
+                 np.float32(0.667),
+                 np.float32(0.0))
+    # Saturation from position: 0 at centre, 1 at extremes
+    s_pos = np.where(t < 0.5,
+                     1.0 - 2.0 * t,
+                     2.0 * t - 1.0
+                     ).astype(np.float32)
+    s = s_pos * ct
+    v = np.ones(len(mu), dtype=np.float32)
+    return _hsv_to_rgb_arr(h, s, v)
+
+
 def _build_glyph_datasets(settings, world):
     """Build the descriptor list for all glyph
     datasets except government.
@@ -558,6 +631,24 @@ def _add_glyph_grid(parent, tag, z_key,
             di.text = (
                 f"{hdf5_file}:/{tag}"
                 f"/Step{step_idx}/{qty}")
+        # Pre-computed RGB colour (float32 vector):
+        #   hue = sigmoid(mu), sat = |cos_theta|,
+        #   value = 1.0. Used with MapScalars=0.
+        cname = f"color_d{d}"
+        attr = etree.SubElement(
+            g, "Attribute",
+            Name=cname,
+            AttributeType="Vector",
+            Center="Node")
+        di = etree.SubElement(
+            attr, "DataItem",
+            NumberType="Float",
+            Precision="4",
+            Dimensions=f"{np_pts} 3",
+            Format="HDF")
+        di.text = (
+            f"{hdf5_file}:/{tag}"
+            f"/Step{step_idx}/{cname}")
 
 
 class GlyphHdf5():
@@ -692,6 +783,10 @@ class GlyphHdf5():
                     f"cos_theta_d{d}",
                     data=ct,
                     compression="gzip")
+                sgrp.create_dataset(
+                    f"color_d{d}",
+                    data=_mu_to_rgb(mu, ct),
+                    compression="gzip")
 
         # Government: replicate scalar to Np.
         np_pts = (
@@ -728,6 +823,16 @@ class GlyphHdf5():
                 data=np.full(
                     np_pts, ct_v,
                     dtype=np.float32),
+                compression="gzip")
+            mu_arr = np.full(
+                np_pts, mu_v,
+                dtype=np.float32)
+            ct_arr = np.full(
+                np_pts, ct_v,
+                dtype=np.float32)
+            sgrp.create_dataset(
+                f"color_d{d}",
+                data=_mu_to_rgb(mu_arr, ct_arr),
                 compression="gzip")
 
     def close(self):
@@ -843,22 +948,17 @@ def write_paraview_script(settings, world):
     """Write a pvpython visualization script
     for the glyph output file.
 
-    Embeds simulation-specific parameters
-    (absolute file path, grid dimensions,
-    dimension counts) at generation time so
-    the script runs without modification.
+    Embeds simulation-specific parameters at
+    generation time. The XDMF path is resolved
+    at runtime relative to the script file so
+    files can be copied to any machine.
 
-    Generated script shows a three-pane layout:
-      Left   — citizens (policy pref/aver/ideal)
-      Middle — politicians (innate+external
-               policy pref/aver, one zone type)
-      Right  — government enacted policy
-    Arrow direction encodes type:
-      +Z => preference/innate, -Z => aversion/
-      external, +X => ideal/enacted.
-    Arrow length ~ certainty (inv_sigma).
-    Arrow colour ~ mu (Cool to Warm).
-    Arrow opacity ~ engagement (|cos_theta|).
+    Three-pane layout (Citizens | Politicians |
+    Government). Arrows coloured by pre-computed
+    RGB (hue = sigmoid(mu), saturation =
+    |cos_theta|, value = 1.0) with no LUT applied
+    (MapScalars = 0). Engagment is therefore
+    visible as colour saturation, not opacity.
 
     Parameters
     ----------
@@ -881,254 +981,187 @@ def write_paraview_script(settings, world):
 
     with open(script_path, "w") as fh:
 
-        # --- Header and embedded metadata ---
+        # --- Header ---
         fh.write(
-            "# Auto-generated by STODEM."
-            " Re-run the simulation\n"
-            "# to regenerate."
-            f" Usage: pvpython {bn}\n"
-            "# Tested with ParaView 6.0.1.\n"
+            f"# Auto-generated by STODEM."
+            f" Re-run simulation to regenerate.\n"
+            f"# Usage: pvpython {bn}\n"
+            f"# Tested with ParaView 6.0.1.\n"
             "#\n"
             "# Three-pane layout:\n"
-            "#   Citizens | Politicians"
-            " | Government\n"
-            "# +Z => pref/innate,"
-            " -Z => aver/external,\n"
-            "#   +X => ideal/enacted"
-            " (horizontal).\n"
-            "# Arrow length"
-            " ~ certainty (sigma_ref/sigma).\n"
-            "# Colour ~ mu"
-            " (Cool to Warm).\n"
-            "# Opacity"
-            " ~ engagement (|cos_theta|).\n\n"
+            "#   Citizens | Politicians | Government\n"
+            "# Arrow direction:"
+            " +Z=pref/innate, -Z=aver/external,\n"
+            "#   +X=ideal/enacted (horizontal).\n"
+            "# Arrow length ~ certainty"
+            " (sigma_ref / sigma).\n"
+            "# Arrow colour: hue=position(mu),"
+            " sat=engagement(|cos_theta|).\n"
+            "#   blue=negative, white=neutral,"
+            " red=positive; grey=apathetic.\n\n"
         )
+
+        # --- Embedded metadata ---
         fh.write(
             "# ---- Simulation metadata"
             " (do not edit) ----\n"
-            "# GLYPHS_XDMF is resolved at"
-            " runtime relative to this\n"
-            "# script so the files can be"
-            " copied to any machine.\n"
+            "# GLYPHS_XDMF is resolved at runtime"
+            " relative to this script\n"
+            "# so the files can be copied"
+            " to any machine.\n"
             f"# Generated from: {xdmf_abs}\n"
             "import os as _os\n"
-            "_here = _os.path.dirname(\n"
-            "    _os.path.abspath(__file__))\n"
-            "GLYPHS_XDMF = _os.path.join(\n"
-            f"    _here, '{xdmf_bn}')\n"
+            "_here = _os.path.dirname("
+            "_os.path.abspath(__file__))\n"
+            f"GLYPHS_XDMF = _os.path.join("
+            f"_here, '{xdmf_bn}')\n"
             f"NUM_POLICY_DIMS = {ndp}\n"
             f"NUM_TRAIT_DIMS  = {ndt}\n"
             f"NUM_ZONE_TYPES  = {nzt}\n"
             f"NX = {nx}\n"
             f"NY = {ny}\n\n"
-            "# ---- User-adjustable"
-            " parameters ----\n"
-            "DIM       = 0"
-            "  # 0..NUM_POLICY_DIMS-1\n"
-            "ZONE_TYPE = 0"
-            "  # 0..NUM_ZONE_TYPES-1\n"
+            "# ---- User-adjustable parameters ----\n"
+            "DIM       = 0  # 0..NUM_POLICY_DIMS-1\n"
+            "ZONE_TYPE = 0  # 0..NUM_ZONE_TYPES-1\n"
             "GLYPH_SCALE = 0.3\n\n"
         )
 
-        # --- Imports and data reader ---
+        # --- Imports and reader ---
         fh.write(
             "from paraview.simple import *\n\n"
-            "reader = Xdmf3ReaderT(\n"
-            "    FileName=[GLYPHS_XDMF])\n"
+            "reader = Xdmf3ReaderT("
+            "FileName=[GLYPHS_XDMF])\n"
             "reader.UpdatePipeline()\n\n\n"
         )
 
-        # --- Helper: extract one named block
-        #   Note: {name} below is a literal
-        #   in the generated file (regular
-        #   Python string in the generator,
-        #   f-string in the generated script).
+        # --- Helpers ---
+        # {name}, {dim}, {_zt} below are literal
+        # braces in the generated file: they are
+        # in regular Python strings here (not
+        # f-strings), so they pass through unchanged
+        # and become f-string variables when the
+        # generated script runs in pvpython.
         fh.write(
             "def extract(name):\n"
-            "    \"\"\"Extract one named"
-            " block from reader.\"\"\"\n"
-            "    eb = ExtractBlock(\n"
-            "        Input=reader)\n"
-            "    eb.Selectors ="
-            " [f'/Root/{name}']\n"
+            "    \"\"\"Return ExtractBlock"
+            " for one named block.\"\"\"\n"
+            "    eb = ExtractBlock(Input=reader)\n"
+            "    eb.Selectors = [f'/Root/{name}']\n"
             "    eb.UpdatePipeline()\n"
             "    return eb\n\n\n"
-        )
-
-        # --- Helper: make arrow glyph ---
-        # {dim} below is a literal brace in
-        # the generated file.
-        fh.write(
-            "def make_glyph(\n"
-            "        src, z_sign, dim,\n"
-            "        scale=GLYPH_SCALE):\n"
+            "def make_glyph(src, z_sign, dim,"
+            " scale=GLYPH_SCALE):\n"
             "    \"\"\"Arrow glyph:"
-            " +Z (z_sign=+1),"
-            " -Z (-1), +X (0).\"\"\"\n"
-            "    g = Glyph(\n"
-            "        Input=src,\n"
-            "        GlyphType='Arrow')\n"
-            "    g.ScaleArray = [\n"
-            "        'POINTS',\n"
-            "        f'inv_sigma_d{dim}']\n"
+            " +Z (z_sign=+1), -Z (-1), +X (0).\"\"\"\n"
+            "    g = Glyph(Input=src,"
+            " GlyphType='Arrow')\n"
+            "    g.ScaleArray = ['POINTS',"
+            " f'inv_sigma_d{dim}']\n"
             "    g.ScaleFactor = scale\n"
-            "    g.GlyphMode = 0"
-            "  # All Points\n"
-            "    g.GlyphTransform.Rotate"
-            " = [\n"
-            "        0.0,"
-            " -90.0 * z_sign, 0.0]\n"
+            "    g.GlyphMode = 0  # All Points\n"
+            "    g.GlyphTransform.Rotate ="
+            " [0.0, -90.0 * z_sign, 0.0]\n"
             "    g.UpdatePipeline()\n"
             "    return g\n\n\n"
-        )
-
-        # --- Helper: apply colour + opacity ---
-        fh.write(
-            "def apply_style("
-            "rep, view, dim):\n"
-            "    \"\"\"Colour by mu,"
-            " opacity by |cos_theta|.\"\"\"\n"
-            "    mu_key ="
-            " f'mu_d{dim}'\n"
-            "    ct_key ="
-            " f'cos_theta_d{dim}'\n"
-            "    ColorBy(rep,"
-            " ('POINTS', mu_key))\n"
-            "    lut ="
-            " GetColorTransferFunction(\n"
-            "        mu_key)\n"
-            "    lut.ApplyPreset(\n"
-            "        'Cool to Warm', True)\n"
-            "    rep.SetScalarBarVisibility(\n"
-            "        view, False)\n"
-            "    rep.EnableOpacityMapping"
-            " = 1\n"
-            "    rep.OpacityArrayName ="
-            " (\n"
-            "        'POINTS', ct_key)\n"
-            "    otf ="
-            " GetOpacityTransferFunction(\n"
-            "        ct_key)\n"
-            "    otf.Points = [\n"
-            "        0.0, 0.0, 0.5, 0.0,\n"
-            "        1.0, 1.0, 0.5, 0.0]\n\n\n"
-        )
-
-        # --- Helper: show pref/aver pair ---
-        fh.write(
-            "def show_pair(\n"
-            "        view, pref_src,"
-            " aver_src, dim):\n"
+            "def apply_style(rep, view, dim):\n"
+            "    \"\"\"Colour by pre-computed"
+            " color_d{dim} (float32 RGB).\n"
+            "    Hue = sigmoid(mu): blue=negative,"
+            " white=0, red=positive.\n"
+            "    Saturation = |cos_theta|:"
+            " vivid=engaged, grey=apathetic.\n"
+            "    MapScalars=0 uses RGB values"
+            " directly without a LUT.\"\"\"\n"
+            "    rep.ColorArrayName ="
+            " ['POINTS', f'color_d{dim}']\n"
+            "    rep.MapScalars = 0\n"
+            "    rep.SetScalarBarVisibility("
+            "view, False)\n\n\n"
+            "def show_pair(view,"
+            " pref_src, aver_src, dim):\n"
             "    \"\"\"Show pref (+Z) and"
-            " aver (-Z) glyphs.\"\"\"\n"
-            "    for src, zs in (\n"
-            "        (pref_src, +1),\n"
-            "        (aver_src, -1),\n"
-            "    ):\n"
-            "        g = make_glyph("
-            "src, zs, dim)\n"
+            " aver (-Z) arrow glyphs.\"\"\"\n"
+            "    for src, zs in"
+            " ((pref_src, +1), (aver_src, -1)):\n"
+            "        g = make_glyph(src, zs, dim)\n"
             "        rep = Show(g, view)\n"
-            "        apply_style("
-            "rep, view, dim)\n\n\n"
+            "        apply_style(rep, view, dim)\n\n\n"
         )
 
         # --- Layout: 3 horizontal panes ---
         fh.write(
-            "# ---- Layout:"
-            " 3 horizontal panes ----\n"
-            "layout = CreateLayout(\n"
-            "    'STODEM Glyphs')\n"
-            "layout.SplitHorizontal(\n"
-            "    0, 1.0/3.0)\n"
-            "layout.SplitHorizontal(\n"
-            "    2, 0.5)\n\n"
-            "view_cit = CreateView("
-            "'RenderView')\n"
-            "view_pol = CreateView("
-            "'RenderView')\n"
-            "view_gov = CreateView("
-            "'RenderView')\n"
-            "AssignViewToLayout(\n"
-            "    view=view_cit,"
-            " layout=layout, hint=1)\n"
-            "AssignViewToLayout(\n"
-            "    view=view_pol,"
-            " layout=layout, hint=3)\n"
-            "AssignViewToLayout(\n"
-            "    view=view_gov,"
-            " layout=layout, hint=4)\n\n"
+            "# ---- Layout: 3 horizontal panes"
+            " ----\n"
+            "layout = CreateLayout('STODEM"
+            " Glyphs')\n"
+            "layout.SplitHorizontal(0, 1.0/3.0)\n"
+            "layout.SplitHorizontal(2, 0.5)\n\n"
+            "view_cit = CreateView('RenderView')\n"
+            "view_pol = CreateView('RenderView')\n"
+            "view_gov = CreateView('RenderView')\n"
+            "AssignViewToLayout("
+            "view=view_cit, layout=layout, hint=1)\n"
+            "AssignViewToLayout("
+            "view=view_pol, layout=layout, hint=3)\n"
+            "AssignViewToLayout("
+            "view=view_gov, layout=layout, hint=4)\n\n"
         )
 
-        # --- Camera: top-down over grid ---
+        # --- Camera: orthographic, top-down ---
         fh.write(
-            "for _v in (\n"
-            "        view_cit,"
-            " view_pol, view_gov):\n"
-            "    _v.CameraPosition = [\n"
-            "        NX/2.0, NY/2.0,\n"
-            "        max(NX, NY)*2.0]\n"
-            "    _v.CameraFocalPoint = [\n"
-            "        NX/2.0, NY/2.0, 0.0]\n"
-            "    _v.CameraViewUp ="
-            " [0.0, 1.0, 0.0]\n"
-            "    _v.CameraParallelProjection"
-            " = 1\n"
-            "    _v.CameraParallelScale"
-            " = max(NX, NY) / 2.0\n\n"
+            "for _v in (view_cit, view_pol,"
+            " view_gov):\n"
+            "    _v.CameraPosition ="
+            " [NX/2.0, NY/2.0, max(NX,NY)*2.0]\n"
+            "    _v.CameraFocalPoint ="
+            " [NX/2.0, NY/2.0, 0.0]\n"
+            "    _v.CameraViewUp = [0.0, 1.0, 0.0]\n"
+            "    _v.CameraParallelProjection = 1\n"
+            "    _v.CameraParallelScale ="
+            " max(NX, NY) / 2.0\n\n"
         )
 
         # --- Citizens pane (left) ---
         fh.write(
-            "# ---- Citizens pane"
-            " (left) ----\n"
-            "_cpp ="
-            " extract('cit_pol_pref')\n"
-            "_cpa ="
-            " extract('cit_pol_aver')\n"
-            "_cpi ="
-            " extract('cit_pol_ideal')\n"
-            "show_pair("
-            "view_cit, _cpp, _cpa, DIM)\n"
-            "_g = make_glyph("
-            "_cpi, 0, DIM)\n"
+            "# ---- Citizens pane (left) ----\n"
+            "_cpp = extract('cit_pol_pref')\n"
+            "_cpa = extract('cit_pol_aver')\n"
+            "_cpi = extract('cit_pol_ideal')\n"
+            "show_pair(view_cit, _cpp, _cpa, DIM)\n"
+            "_g = make_glyph(_cpi, 0, DIM)\n"
             "_r = Show(_g, view_cit)\n"
-            "apply_style("
-            "_r, view_cit, DIM)\n"
+            "apply_style(_r, view_cit, DIM)\n"
             "Render(view_cit)\n\n"
         )
 
         # --- Politicians pane (middle) ---
-        # {_zt} below is a literal brace
-        # in the generated file.
+        # {_zt} is a literal brace in the
+        # generated file (f-string variable
+        # at pvpython runtime).
         fh.write(
-            "# ---- Politicians pane"
-            " (middle) ----\n"
+            "# ---- Politicians pane (middle)"
+            " ----\n"
             "_zt = ZONE_TYPE\n"
-            "_pip = extract(\n"
-            "    f'pol_inn_pol_pref_zt{_zt}')\n"
-            "_pia = extract(\n"
-            "    f'pol_inn_pol_aver_zt{_zt}')\n"
-            "_pep = extract(\n"
-            "    f'pol_ext_pol_pref_zt{_zt}')\n"
-            "_pea = extract(\n"
-            "    f'pol_ext_pol_aver_zt{_zt}')\n"
-            "show_pair("
-            "view_pol, _pip, _pia, DIM)\n"
-            "show_pair("
-            "view_pol, _pep, _pea, DIM)\n"
+            "_pip = extract("
+            "f'pol_inn_pol_pref_zt{_zt}')\n"
+            "_pia = extract("
+            "f'pol_inn_pol_aver_zt{_zt}')\n"
+            "_pep = extract("
+            "f'pol_ext_pol_pref_zt{_zt}')\n"
+            "_pea = extract("
+            "f'pol_ext_pol_aver_zt{_zt}')\n"
+            "show_pair(view_pol, _pip, _pia, DIM)\n"
+            "show_pair(view_pol, _pep, _pea, DIM)\n"
             "Render(view_pol)\n\n"
         )
 
         # --- Government pane (right) ---
         fh.write(
-            "# ---- Government pane"
-            " (right) ----\n"
+            "# ---- Government pane (right) ----\n"
             "_gov = extract('gov_pol')\n"
-            "_g = make_glyph("
-            "_gov, 0, DIM)\n"
+            "_g = make_glyph(_gov, 0, DIM)\n"
             "_r = Show(_g, view_gov)\n"
-            "apply_style("
-            "_r, view_gov, DIM)\n"
+            "apply_style(_r, view_gov, DIM)\n"
             "Render(view_gov)\n\n"
             "RenderAllViews()\n"
         )
