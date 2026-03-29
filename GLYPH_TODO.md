@@ -38,6 +38,25 @@ generated ParaView script. Key design decisions:
 
 ---
 
+## Resolved Items
+
+TODOs #1–#6 are fully implemented in
+`src/scripts/output.py` and `src/scripts/stodem.py`.
+
+The following bugs were found and fixed during
+TODO #7 (quickTest verification):
+
+| # | Bug | Fix |
+|---|-----|-----|
+| B1 | XDMF path hardcoded at generation time; fails when files are copied to another machine. | Generate path at runtime using `os.path.dirname(os.path.abspath(__file__))`. |
+| B2 | `ExtractBlockUsingDataAssembly` not exported by `paraview.simple` in all builds. | Add compatibility shim: `try: ExtractBlockUsingDataAssembly / except NameError: ExtractBlockUsingDataAssembly = ExtractBlock`. |
+| B3 | Unequal pane widths: `SplitHorizontal` used wrong cell index (`k-1`). | Track right-child cell as `2*cell+2` after each split. |
+| B4 | Pane 3 (`citizen_policy_ideal`) invisible: sigma ≈ 0.001–0.014, ~100× smaller than stated policy. Single `CYLINDER_RADIUS_SCALE` cannot span both types. | Add per-group `SIGMA_REFS` normalization (mean sigma per group, computed at generation time). Calculator: `sigma / SIGMA_REFS[group] * CYLINDER_RADIUS_SCALE`. |
+| B5 | Time stepping broken: four independent `CollectionType="Temporal"` grids at Domain level; ParaView Time Manager cannot unify them. | Restructured to single outer temporal collection (matching `stodem.xdmf`), spatial collection per step containing all named grids. |
+| B6 | Default scales wrong: `POPULATION_SCALE=0.3` gave height ≈ 0.003 for quickTest; `CYLINDER_RADIUS_SCALE=1.0` gave radius up to 3.5. | `POPULATION_SCALE = 0.3 * num_patches` (computed at generation time); `CYLINDER_RADIUS_SCALE = 0.3`. |
+
+---
+
 ## TODO Items
 
 ### 1. Confirm sigma values are accessible at output time
@@ -326,45 +345,49 @@ for dimension DIM):**
 
 **Directory:** `jobs/quickTest/`
 
-**Action:** Run `python3 ../../src/scripts/stodem.py`
-and verify:
+**Status:** In progress. Re-run required after
+XDMF restructure (B5 above) to verify time
+stepping. Re-run also regenerates `stodem_glyphs.py`
+with new default scales (B6) and SIGMA_REFS (B4).
 
-**HDF5 structure:**
-- All Gaussian type groups from GLYPH_DESIGN.md HDF5
-  tree are present with correct step subgroups.
-- `GlyphGeometry/patches/XYZ` shape:
-  (num_patches, 3) — 2D array, not flat 1D.
-  All z values are 0.
-- `GlyphGeometry/zone_type_0/Step0/XYZ` present
-  and shape (num_zones[0], 3). All z values are 0.
-- `GlyphGeometry/zone_type_1/XYZ` present (static,
-  no step subgroups) and shape (num_zones[1], 3).
-- `GlyphGeometry/government/XYZ` shape (1, 3),
-  static (no step subgroups). z value is 0.
-- `citizen_patch_population/Step0/count` shape:
-  (num_patches,). Values in [0, 1]; sum ≈ 1.0.
-- `politician_zone_population_zone_type_0/Step0/count`
-  shape: (num_zones[0],). Values in [0, 1].
-- `government_population/Step0/count` shape: (1,).
-  Value is [1.0].
-- sigma values are positive (> 0) for all datasets.
-- `color_rgb_dim0` present in each step subgroup;
-  shape (N, 3), all values in [0, 1].
+**Command:** `python3 ../../src/scripts/stodem.py`
 
-**XDMF:**
-- Valid XML; parse with lxml without errors.
-- Separate named Grid entries for patches, each
-  zone type, and government.
-- zone_type_0 Grid references per-step geometry paths.
-- zone_type_1 Grid references the same static XYZ for
-  all steps.
-- government Grid references static geometry for all
-  steps.
+**HDF5 structure (verified ✓ / pending ?):**
+- ✓ All Gaussian type groups present with step
+  subgroups.
+- ✓ `GlyphGeometry/patches/XYZ` shape (81, 3).
+- ✓ `GlyphGeometry/zone_type_0/Step0/XYZ` shape
+  (num_zones[0], 3).
+- ? `GlyphGeometry/zone_type_1/XYZ` present
+  (static) and shape (num_zones[1], 3).
+- ? `GlyphGeometry/government/XYZ` shape (1, 3).
+- ✓ `citizen_patch_population/Step0/count` in
+  [0, 1], sum ≈ 1.0.
+- ? `politician_zone_population_zone_type_0/
+  Step0/count` in [0, 1].
+- ? `government_population/Step0/count` = [1.0].
+- ✓ sigma > 0 for all datasets.
+- ✓ `color_rgb_dim0` shape (N, 3), values in
+  [0, 1].
+
+**XDMF (pending re-run with new structure):**
+- ? Valid XML after restructure.
+- ? Single outer temporal collection with named
+  grids inside each step's spatial collection.
+- ? zone_type_0 grid references per-step geometry.
+- ? zone_type_1 grid references static XYZ.
+- ? government grid references static geometry.
 
 **ParaView script:**
-- Runs in pvpython without error.
-- Glyphs visible after tuning POPULATION_SCALE and
-  CYLINDER_RADIUS_SCALE.
+- ✓ Panes 1 and 2 (`citizen_policy_pref`,
+  `citizen_policy_aver`) render with glyphs.
+- ✓ Pane 3 (`citizen_policy_ideal`) now visible
+  after SIGMA_REFS fix.
+- ✓ Three panes equal width.
+- ? Time stepping via Time Manager — re-run
+  required to verify XDMF restructure (B5).
+- ? Final scale factor validation (user adjusting
+  `POPULATION_SCALE` / `CYLINDER_RADIUS_SCALE`).
 
 ---
 

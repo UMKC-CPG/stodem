@@ -586,17 +586,20 @@
 #import pudb
 #pudb.set_trace()
 
+import os
 import numpy as np
 
 from settings import ScriptSettings
 from sim_control import SimControl
 from world import World
-from output import Hdf5, Xdmf
+from output import (Hdf5, Xdmf,
+                    GlyphHdf5, GlyphXdmf,
+                    write_paraview_script)
 from diagnostics import Diagnostics
 
 
 def campaign(sim_control, settings, world,
-             hdf5, diag, cycle):
+             hdf5, glyph_hdf5, diag, cycle):
     """Execute one full campaign phase.
 
     The campaign phase is where politicians
@@ -743,6 +746,8 @@ def campaign(sim_control, settings, world,
         for p in world.properties:
             hdf5.add_dataset(
                 p, sim_control.curr_step)
+        glyph_hdf5.add_step(
+            world, sim_control.curr_step)
         print ("Data written")
 
         # Log diagnostics (no forces during
@@ -849,7 +854,7 @@ def vote(sim_control, world):
 
 
 def govern(sim_control, world, hdf5,
-           diag, cycle):
+           glyph_hdf5, diag, cycle):
     """Execute the govern phase: elected politicians
     exert forces on the government's enacted policy.
 
@@ -1028,6 +1033,8 @@ def govern(sim_control, world, hdf5,
         for p in world.properties:
             hdf5.add_dataset(
                 p, sim_control.curr_step)
+        glyph_hdf5.add_step(
+            world, sim_control.curr_step)
 
         # Log diagnostics with the forces
         #   that were applied this step and the
@@ -1063,6 +1070,42 @@ def govern(sim_control, world, hdf5,
     Pge.update_integration_variables()
 
 
+def _prompt_overwrite(settings):
+    """If any output files from a previous run
+    exist, list them and ask the user whether to
+    delete them before continuing.  Pressing
+    Enter (or 'y') deletes the files.  Typing
+    'n' aborts the program.
+    """
+    candidates = [
+        f"{settings.outfile}.hdf5",
+        f"{settings.outfile}.xdmf",
+        f"{settings.outfile}_glyphs.hdf5",
+        f"{settings.outfile}_glyphs.xdmf",
+        f"{settings.outfile}_glyphs.py",
+        "pge.plot",
+        "forces.plot",
+        "citizens.plot",
+    ]
+    existing = [
+        f for f in candidates
+        if os.path.exists(f)]
+    if not existing:
+        return
+    print("The following output files already"
+          " exist:")
+    for f in existing:
+        print(f"  {f}")
+    response = input(
+        "Delete and continue? [Y/n] "
+    ).strip().lower()
+    if response not in ("", "y"):
+        print("Aborted.")
+        raise SystemExit(0)
+    for f in existing:
+        os.remove(f)
+
+
 def main():
 
     # Get script settings from a combination of the resource control file
@@ -1093,10 +1136,13 @@ def main():
     #   and the govern-phase gap correctly).
     sim_control.compute_data_range(settings, world)
     print ("Data Range Computed")
+    _prompt_overwrite(settings)
     xdmf = Xdmf(settings)
     print ("XDMF Initialized")
     hdf5 = Hdf5(settings, world)
     print ("HDF5 File Created")
+    glyph_hdf5 = GlyphHdf5(settings, world)
+    print ("Glyph HDF5 File Created")
 
     # Select sample citizens for diagnostic
     #   tracking: first, middle, and last in
@@ -1113,12 +1159,13 @@ def main():
     for cycle in range(sim_control.num_cycles):
         print ("cycle = ", cycle)
         campaign(sim_control, settings,
-                 world, hdf5, diag, cycle)
+                 world, hdf5, glyph_hdf5,
+                 diag, cycle)
 
         vote(sim_control, world)
 
         govern(sim_control, world, hdf5,
-               diag, cycle)
+               glyph_hdf5, diag, cycle)
 
     # Finalize: write XDMF using the actual
     #   number of steps completed, then close
@@ -1128,6 +1175,12 @@ def main():
         world)
     print ("XDMF File Written")
     hdf5.close()
+    glyph_xdmf = GlyphXdmf(settings, glyph_hdf5)
+    glyph_xdmf.write(sim_control.curr_step)
+    print ("Glyph XDMF File Written")
+    write_paraview_script(settings, world)
+    print ("ParaView Script Written")
+    glyph_hdf5.close()
     diag.close()
 
 

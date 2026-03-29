@@ -1913,7 +1913,66 @@ as a future parameter rather than an active bug.
 
 ---
 
-## 16. Design Principles
+## 16. Development Checkpoints (Git Tags)
+
+Design iterations are recorded as git tags so that any
+baseline can be restored if an implementation attempt
+goes poorly. Use a tag before starting any significant
+implementation effort.
+
+### Creating a checkpoint
+
+```bash
+git add <files>
+git commit -m "Description of design baseline"
+git tag <tag-name>
+```
+
+Example tags used in this project:
+- `glyph-design-v2` — cylinder glyph design complete,
+  old glyph code removed, ready for fresh implementation
+
+### Retreating to a checkpoint
+
+To restore specific files to a tagged state (stays on
+the current branch, files are staged):
+
+```bash
+git checkout <tag-name> -- \
+    src/scripts/output.py \
+    src/scripts/stodem.py \
+    GLYPH_DESIGN.md \
+    GLYPH_TODO.md
+git commit -m "Revert to <tag-name> design baseline"
+```
+
+Only the listed files are affected. Other files
+(newly created test outputs, helper modules, etc.)
+are left untouched and must be cleaned up manually
+if needed.
+
+### Inspecting a checkpoint without changing anything
+
+```bash
+# View a single file at the tag
+git show <tag-name>:src/scripts/output.py | less
+
+# Compare tagged version to current working file
+git diff <tag-name> -- src/scripts/output.py
+```
+
+### Starting a fresh attempt on a new branch
+
+```bash
+git checkout -b glyph-retry-v3 <tag-name>
+```
+
+This creates a new branch rooted at the tag, leaving
+`main` untouched.
+
+---
+
+## 17. Design Principles
 
 1. **Abstract dimensions**: All policy and personality trait
    dimensions are abstract. The simulation makes no assumption

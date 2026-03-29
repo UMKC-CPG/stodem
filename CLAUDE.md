@@ -63,7 +63,7 @@ The codebase has been refactored from a monolithic `stodem.py` into separate mod
 | `politician.py` | `Politician` — agent with innate and external policy/trait positions, strategies |
 | `government.py` | `Government` — enacts policies affecting citizen well-being |
 | `gaussian.py` | `Gaussian` — complex Gaussian functions with overlap integral computation |
-| `output.py` | `Hdf5`, `Xdmf` — output generation for Paraview visualization |
+| `output.py` | `Hdf5`, `Xdmf` — standard output; `GlyphHdf5`, `GlyphXdmf`, `write_paraview_script` — cylinder glyph output |
 | `random_state.py` | Global `rng` (numpy default_rng, seed=8675309) |
 
 ### Simulation Flow
@@ -127,6 +127,18 @@ Key sections:
   `ExtTrait` (per trait dim) — suffixed `_ZT{zt}`.
 - `*.xdmf`: XML metadata for Paraview; written after
   simulation completes using actual steps written.
+- `*_glyphs.hdf5`: Cylinder glyph data for all
+  Gaussian types. Groups per type (e.g.
+  `citizen_policy_pref`) with per-step sub-groups
+  containing `mu_dim{d}`, `sigma_dim{d}`,
+  `cos_theta_dim{d}`, `color_rgb_dim{d}` arrays.
+  Geometry under `GlyphGeometry/{group}`.
+- `*_glyphs.xdmf`: XDMF for glyph HDF5. Single
+  outer temporal collection; each step is a spatial
+  collection of named uniform grids.
+- `*_glyphs.py`: Auto-generated pvpython script with
+  per-group `SIGMA_REFS` normalization and
+  `POPULATION_SCALE` / `CYLINDER_RADIUS_SCALE`.
 - `command`: Execution log with timestamps
 
 ## Known Issues

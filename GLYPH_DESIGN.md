@@ -260,8 +260,17 @@ per time step (`Step0`, `Step1`, ...). Within each
 step, there are 4 × num_dims datasets:
 `mu_dim{d}`, `sigma_dim{d}`, `cos_theta_dim{d}`,
 `color_rgb_dim{d}`.
-sigma is stored raw; visual radius scale is set by
-CYLINDER_RADIUS_SCALE in the ParaView script.
+sigma is stored raw. The ParaView script normalizes
+it per-group by a `SIGMA_REFS` dict (mean sigma
+across all agents for that group, computed at
+script-generation time from the world). The
+Calculator formula is `sigma / SIGMA_REFS[group] *
+CYLINDER_RADIUS_SCALE`. This normalization is
+necessary because different Gaussian types have
+wildly different sigma scales (e.g., ideal_policy
+sigma ≈ 0.001–0.014, stated_policy sigma ≈ 0.05–
+3.5), so a single scale factor cannot make all
+groups visible simultaneously without it.
 color_rgb_dim{d} stores pre-computed HSV-derived
 RGB values: shape (N, 3), float32, values in
 [0, 1]. Hue encodes mu; saturation encodes
@@ -436,24 +445,36 @@ Citizens and each zone type of politicians have
 different point counts (num_patches vs.
 num_zones[0], num_zones[1], ...), so they cannot
 share a single XDMF Grid entry. Each requires its
-own `<Grid>` block. These are written as sibling
-`<Grid>` elements within one XDMF `<Domain>`,
-giving one XDMF file with multiple named,
-selectable grids in ParaView.
+own named `<Grid>`.
+
+**Structure**: one outer `<Grid CollectionType=
+"Temporal">` at the Domain level (matching the
+regular `stodem.xdmf` pattern). Each time step is
+a `<Grid GridType="Collection">` spatial collection
+inside the temporal collection, containing the
+named uniform grids (`patches_grid`,
+`zone_type_0_grid`, ..., `government_grid`) as
+children. This single temporal axis is required for
+ParaView's Time Manager to advance all grids
+simultaneously; multiple independent temporal
+collections at the Domain level prevent time
+stepping.
+
+Each named grid's `<Topology>` uses
+`NumberOfElements` read from the actual HDF5
+dataset shape at that step, not a cached constant.
 
 For static geometries (patches, zone_type_1 and
 higher), all timesteps reference the same HDF5
-geometry dataset. For zone_type_0, each timestep's
-`<Grid>` references its own
-`GlyphGeometry/zone_type_0/Step{i}/XYZ`.
+geometry dataset. For zone_type_0, each step
+references `GlyphGeometry/zone_type_0/Step{i}/XYZ`.
 
-Implementation note: the XDMF writer must derive
-the point count for each timestep's `<Topology>`
-from the actual HDF5 dataset shape at that step
-(e.g., `dataset.shape[0]`), not from a cached
-global constant. This ensures correctness if
-`num_zones[0]` changes between steps in the
-future.
+`ExtractBlock.Selectors = ['/Root/patches_grid']`
+works correctly with this structure: the temporal
+axis is transparent to block selection — the
+reader resolves the current time before presenting
+the spatial collection, so block names appear at
+the top level of the data assembly.
 
 ---
 
