@@ -54,6 +54,7 @@ TODO #7 (quickTest verification):
 | B4 | Pane 3 (`citizen_policy_ideal`) invisible: sigma ≈ 0.001–0.014, ~100× smaller than stated policy. Single `CYLINDER_RADIUS_SCALE` cannot span both types. | Add per-group `SIGMA_REFS` normalization (mean sigma per group, computed at generation time). Calculator: `sigma / SIGMA_REFS[group] * CYLINDER_RADIUS_SCALE`. |
 | B5 | Time stepping broken: four independent `CollectionType="Temporal"` grids at Domain level; ParaView Time Manager cannot unify them. | Restructured to single outer temporal collection (matching `stodem.xdmf`), spatial collection per step containing all named grids. |
 | B6 | Default scales wrong: `POPULATION_SCALE=0.3` gave height ≈ 0.003 for quickTest; `CYLINDER_RADIUS_SCALE=1.0` gave radius up to 3.5. | `POPULATION_SCALE = 0.3 * num_patches` (computed at generation time); `CYLINDER_RADIUS_SCALE = 0.3`. |
+| B7 | `Xdmf3ReaderS` does not expose block hierarchy in the GUI (known unresolved bug). `ExtractBlock` could not isolate individual grids; all topologies merged into Block0 (11 points for smallTest: 9 patches + 1 zone + 1 government). | Write separate XDMF files per grid type (`patches.xdmf`, `zone_type_{t}.xdmf`, `government.xdmf`) into a subdirectory alongside the HDF5. Script loads one reader per file; no `ExtractBlock` needed. HDF5 and XDMF files placed in `{outfile}_glyphs/` subdirectory for easy drag-and-drop copying. |
 
 ---
 
@@ -345,10 +346,9 @@ for dimension DIM):**
 
 **Directory:** `jobs/quickTest/`
 
-**Status:** In progress. Re-run required after
-XDMF restructure (B5 above) to verify time
-stepping. Re-run also regenerates `stodem_glyphs.py`
-with new default scales (B6) and SIGMA_REFS (B4).
+**Status:** Re-run required after B7 redesign.
+Output now goes into `{outfile}_glyphs/`
+subdirectory.
 
 **Command:** `python3 ../../src/scripts/stodem.py`
 
@@ -371,23 +371,18 @@ with new default scales (B6) and SIGMA_REFS (B4).
   [0, 1].
 
 **XDMF (pending re-run with new structure):**
-- ? Valid XML after restructure.
-- ? Single outer temporal collection with named
-  grids inside each step's spatial collection.
-- ? zone_type_0 grid references per-step geometry.
-- ? zone_type_1 grid references static XYZ.
-- ? government grid references static geometry.
+- ? Separate files written to subdirectory.
+- ? `patches.xdmf` loads 9 points (smallTest).
+- ? `zone_type_0.xdmf` loads 1 point (smallTest).
+- ? `government.xdmf` loads 1 point.
+- ? Time Manager synchronizes all readers.
 
 **ParaView script:**
-- ✓ Panes 1 and 2 (`citizen_policy_pref`,
-  `citizen_policy_aver`) render with glyphs.
-- ✓ Pane 3 (`citizen_policy_ideal`) now visible
-  after SIGMA_REFS fix.
 - ✓ Three panes equal width.
-- ? Time stepping via Time Manager — re-run
-  required to verify XDMF restructure (B5).
-- ? Final scale factor validation (user adjusting
-  `POPULATION_SCALE` / `CYLINDER_RADIUS_SCALE`).
+- ✓ Time stepping via Time Manager verified.
+- ? Each pane loads correct point count (no
+  merged block).
+- ? Final scale factor validation.
 
 ---
 

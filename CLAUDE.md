@@ -127,18 +127,24 @@ Key sections:
   `ExtTrait` (per trait dim) — suffixed `_ZT{zt}`.
 - `*.xdmf`: XML metadata for Paraview; written after
   simulation completes using actual steps written.
-- `*_glyphs.hdf5`: Cylinder glyph data for all
-  Gaussian types. Groups per type (e.g.
-  `citizen_policy_pref`) with per-step sub-groups
-  containing `mu_dim{d}`, `sigma_dim{d}`,
-  `cos_theta_dim{d}`, `color_rgb_dim{d}` arrays.
-  Geometry under `GlyphGeometry/{group}`.
-- `*_glyphs.xdmf`: XDMF for glyph HDF5. Single
-  outer temporal collection; each step is a spatial
-  collection of named uniform grids.
-- `*_glyphs.py`: Auto-generated pvpython script with
-  per-group `SIGMA_REFS` normalization and
-  `POPULATION_SCALE` / `CYLINDER_RADIUS_SCALE`.
+- `*_glyphs/`: Subdirectory containing all glyph
+  data files (HDF5 + XDMF). Copy this directory
+  for drag-and-drop transfer to another machine.
+  - `*_glyphs.hdf5`: Cylinder glyph data for all
+    Gaussian types. Groups per type with per-step
+    sub-groups: `mu_dim{d}`, `sigma_dim{d}`,
+    `cos_theta_dim{d}`, `color_rgb_dim{d}`.
+    Geometry under `GlyphGeometry/{group}`.
+  - `patches.xdmf`: XDMF for citizen patch grid.
+    Simple temporal collection of Uniform grids.
+  - `zone_type_{t}.xdmf`: XDMF for politician
+    zone type t grid.
+  - `government.xdmf`: XDMF for government grid.
+- `*_glyphs.py`: Auto-generated pvpython script.
+  Loads one XDMF reader per grid type from the
+  subdirectory (no ExtractBlock needed). Tunable
+  constants: `SIGMA_REFS`, `POPULATION_SCALE`,
+  `CYLINDER_RADIUS_SCALE`.
 - `command`: Execution log with timestamps
 
 ## Known Issues

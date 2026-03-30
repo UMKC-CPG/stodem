@@ -491,8 +491,15 @@ class GlyphHdf5():
     """
 
     def __init__(self, settings, world):
+        subdir = f"{settings.outfile}_glyphs"
+        os.makedirs(subdir, exist_ok=True)
+        hdf5_basename = (
+            os.path.basename(settings.outfile)
+            + "_glyphs.hdf5")
+        self.subdir = subdir
+        self.hdf5_basename = hdf5_basename
         self.h_fid = h5.File(
-            f"{settings.outfile}_glyphs.hdf5",
+            os.path.join(subdir, hdf5_basename),
             "x")
         self.datasets = _build_glyph_datasets(
             settings, world)
@@ -739,136 +746,55 @@ class GlyphHdf5():
 
 
 class GlyphXdmf():
-    """Writes the glyph XDMF metadata file that
-    describes `*_glyphs.hdf5` for ParaView.
+    """Writes per-grid-type XDMF files into the
+    glyph subdirectory. One file per topology:
 
-    Uses a single top-level temporal collection
-    (matching the regular stodem.xdmf pattern)
-    so ParaView's Time Manager works correctly.
-    Each time step is a spatial collection
-    containing one uniform Grid per topology:
-    patches_grid, zone_type_{t}_grid, and
-    government_grid.
+    - patches.xdmf      (citizens, 81 points)
+    - zone_type_{t}.xdmf (politicians)
+    - government.xdmf   (1 point)
+
+    Each file is a simple temporal collection of
+    Uniform grids (one per step). This gives
+    Xdmf3ReaderS one independent time series per
+    file, which it handles correctly. Because
+    each file has only one grid type, ParaView
+    loads them separately and there is no block
+    isolation problem.
     """
 
     def __init__(self, settings, glyph_hdf5):
         self.settings = settings
         self.hdf5 = glyph_hdf5
 
-    def _write_uniform_grid(
-            self, parent, grid_name,
-            geom_path, descs, step,
-            pop_attr_name, pop_path, hname):
-        """Append one Uniform Grid element to
-        parent for a single time step.
+    def _write_xdmf_file(
+            self, filename, grid_name,
+            descs, geom_path_fn,
+            pop_attr_name, pop_path_fn,
+            num_steps):
+        """Write one XDMF file: a temporal
+        collection of Uniform grids.
 
         Parameters
         ----------
-        parent        : lxml Element
-            The spatial-collection Grid for
-            this time step.
+        filename      : str
+            Full path to the output file.
         grid_name     : str
-        geom_path     : str
-            HDF5 path to the XYZ geometry
-            dataset for this step.
+            Name attribute of the temporal
+            collection Grid element.
         descs         : list of _GlyphDataset
             Gaussian groups on this topology.
-        step          : int
+        geom_path_fn  : callable(int) -> str
+            Returns HDF5 path to XYZ for step i.
         pop_attr_name : str
             XDMF Attribute name for population.
-        pop_path      : str
-            HDF5 path to the population count
-            dataset for this step.
-        hname         : str
-            HDF5 filename (absolute path).
+        pop_path_fn   : callable(int) -> str
+            Returns HDF5 path to population
+            count dataset for step i.
+        num_steps     : int
         """
-        hf = self.hdf5.h_fid
-        n  = hf[geom_path].shape[0]
-        grid = etree.SubElement(
-            parent, "Grid",
-            Name=grid_name,
-            GridType="Uniform")
-        etree.SubElement(
-            grid, "Topology",
-            Type="Polyvertex",
-            NumberOfElements=f"{n}")
-        geo = etree.SubElement(
-            grid, "Geometry",
-            GeometryType="XYZ")
-        geo_di = etree.SubElement(
-            geo, "DataItem",
-            NumberType="Float",
-            Dimensions=f"{n} 3",
-            Format="HDF")
-        geo_di.text = (
-            f"{hname}:/{geom_path}")
-        # Gaussian attributes per group.
-        for desc in descs:
-            base = (
-                f"{desc.group_name}"
-                f"/Step{step}")
-            for d in range(desc.num_dims):
-                for ds_name, atype, dims in [
-                    (f"mu_dim{d}",
-                     "Scalar", f"{n}"),
-                    (f"sigma_dim{d}",
-                     "Scalar", f"{n}"),
-                    (f"cos_theta_dim{d}",
-                     "Scalar", f"{n}"),
-                    (f"color_rgb_dim{d}",
-                     "Vector", f"{n} 3"),
-                ]:
-                    attr_name = (
-                        f"{desc.group_name}"
-                        f"_{ds_name}")
-                    attr_el = etree.SubElement(
-                        grid, "Attribute",
-                        Name=attr_name,
-                        Center="Node",
-                        AttributeType=atype)
-                    di = etree.SubElement(
-                        attr_el, "DataItem",
-                        NumberType="Float",
-                        Dimensions=dims,
-                        Format="HDF")
-                    di.text = (
-                        f"{hname}:/"
-                        f"{base}/{ds_name}")
-        # Population attribute.
-        pop_el = etree.SubElement(
-            grid, "Attribute",
-            Name=pop_attr_name,
-            Center="Node",
-            AttributeType="Scalar")
-        pop_di = etree.SubElement(
-            pop_el, "DataItem",
-            NumberType="Float",
-            Dimensions=f"{n}",
-            Format="HDF")
-        pop_di.text = (
-            f"{hname}:/{pop_path}")
-
-    def write(self, num_steps):
-        """Build and write the XDMF file.
-
-        Uses a single temporal collection at
-        the Domain level so that ParaView's
-        Time Manager advances all grids
-        together. Each step is a spatial
-        collection containing all named grids.
-
-        Parameters
-        ----------
-        num_steps : int
-            Actual number of steps written to
-            the glyph HDF5 file.
-        """
-        hname = (
-            f"{self.settings.outfile}"
-            f"_glyphs.hdf5")
-        xf = open(
-            f"{self.settings.outfile}"
-            f"_glyphs.xdmf", "w")
+        hname = self.hdf5.hdf5_basename
+        hf    = self.hdf5.h_fid
+        xf = open(filename, 'w')
         xf.write(
             '<?xml version="1.0"'
             ' encoding="utf-8"?>\n')
@@ -883,87 +809,152 @@ class GlyphXdmf():
                 "XInclude]"))
         domain = etree.SubElement(
             xdmf, "Domain")
-
-        # Single outer temporal collection —
-        # same pattern as the regular XDMF so
-        # ParaView's Time Manager works.
         temporal = etree.SubElement(
             domain, "Grid",
-            Name="GlyphTimeSteps",
+            Name=grid_name,
             GridType="Collection",
             CollectionType="Temporal")
-
-        cit_descs = [
-            d for d in self.hdf5.datasets
-            if d.zone_type is None]
-        gov_descs = [
-            d for d in self.hdf5.datasets
-            if d.zone_type == 'government']
-
         for i in range(num_steps):
-            # One spatial collection per step.
-            step_grp = etree.SubElement(
+            geom_path = geom_path_fn(i)
+            n = hf[geom_path].shape[0]
+            step_grid = etree.SubElement(
                 temporal, "Grid",
                 Name=f"Step{i}",
-                GridType="Collection",
-                CollectionType="Spatial")
+                GridType="Uniform")
             etree.SubElement(
-                step_grp, "Time",
+                step_grid, "Time",
                 Value=f"{i}.0")
-
-            # Patches grid (citizens).
-            self._write_uniform_grid(
-                step_grp, 'patches_grid',
-                'GlyphGeometry/patches/XYZ',
-                cit_descs, i,
-                'citizen_population',
-                f'citizen_patch_population'
-                f'/Step{i}/count',
-                hname)
-
-            # Zone-type grids (politicians).
-            for t in range(
-                    self.hdf5.num_zone_types):
-                pol_descs = [
-                    d for d in self.hdf5.datasets
-                    if d.zone_type == t]
-                if t == 0:
-                    gpath = (
-                        f'GlyphGeometry'
-                        f'/zone_type_0'
-                        f'/Step{i}/XYZ')
-                else:
-                    gpath = (
-                        f'GlyphGeometry'
-                        f'/zone_type_{t}/XYZ')
-                self._write_uniform_grid(
-                    step_grp,
-                    f'zone_type_{t}_grid',
-                    gpath,
-                    pol_descs, i,
-                    'zone_population',
-                    f'politician_zone_population'
-                    f'_zone_type_{t}'
-                    f'/Step{i}/count',
-                    hname)
-
-            # Government grid.
-            self._write_uniform_grid(
-                step_grp, 'government_grid',
-                'GlyphGeometry/government/XYZ',
-                gov_descs, i,
-                'government_population',
-                f'government_population'
-                f'/Step{i}/count',
-                hname)
-
-        # Serialize and write to file.
+            etree.SubElement(
+                step_grid, "Topology",
+                Type="Polyvertex",
+                NumberOfElements=f"{n}")
+            geo = etree.SubElement(
+                step_grid, "Geometry",
+                GeometryType="XYZ")
+            geo_di = etree.SubElement(
+                geo, "DataItem",
+                NumberType="Float",
+                Dimensions=f"{n} 3",
+                Format="HDF")
+            geo_di.text = (
+                f"{hname}:/{geom_path}")
+            for desc in descs:
+                base = (
+                    f"{desc.group_name}"
+                    f"/Step{i}")
+                for d in range(desc.num_dims):
+                    for ds_name, atype, dims in [
+                        (f"mu_dim{d}",
+                         "Scalar", f"{n}"),
+                        (f"sigma_dim{d}",
+                         "Scalar", f"{n}"),
+                        (f"cos_theta_dim{d}",
+                         "Scalar", f"{n}"),
+                        (f"color_rgb_dim{d}",
+                         "Vector", f"{n} 3"),
+                    ]:
+                        attr_name = (
+                            f"{desc.group_name}"
+                            f"_{ds_name}")
+                        attr_el = etree.SubElement(
+                            step_grid, "Attribute",
+                            Name=attr_name,
+                            Center="Node",
+                            AttributeType=atype)
+                        di = etree.SubElement(
+                            attr_el, "DataItem",
+                            NumberType="Float",
+                            Dimensions=dims,
+                            Format="HDF")
+                        di.text = (
+                            f"{hname}:/"
+                            f"{base}/{ds_name}")
+            pop_path = pop_path_fn(i)
+            pop_el = etree.SubElement(
+                step_grid, "Attribute",
+                Name=pop_attr_name,
+                Center="Node",
+                AttributeType="Scalar")
+            pop_di = etree.SubElement(
+                pop_el, "DataItem",
+                NumberType="Float",
+                Dimensions=f"{n}",
+                Format="HDF")
+            pop_di.text = (
+                f"{hname}:/{pop_path}")
         temp_xml = etree.tostring(
             xdmf, pretty_print=True,
             encoding="utf-8").decode()
         xf.write(temp_xml.replace(
             "xmlnsxi", "xmlns:xi", 1))
         xf.close()
+
+    def write(self, num_steps):
+        """Write one XDMF file per grid type."""
+        subdir = self.hdf5.subdir
+        nzt    = self.hdf5.num_zone_types
+
+        # Patches file (citizens).
+        cit_descs = [
+            d for d in self.hdf5.datasets
+            if d.zone_type is None]
+        self._write_xdmf_file(
+            os.path.join(subdir, 'patches.xdmf'),
+            'patches',
+            cit_descs,
+            lambda i: 'GlyphGeometry/patches/XYZ',
+            'citizen_population',
+            lambda i: (
+                f'citizen_patch_population'
+                f'/Step{i}/count'),
+            num_steps)
+
+        # Zone-type files (politicians).
+        for t in range(nzt):
+            pol_descs = [
+                d for d in self.hdf5.datasets
+                if d.zone_type == t]
+            def geom_fn(i, _t=t):
+                if _t == 0:
+                    return (
+                        f'GlyphGeometry'
+                        f'/zone_type_0'
+                        f'/Step{i}/XYZ')
+                return (
+                    f'GlyphGeometry'
+                    f'/zone_type_{_t}/XYZ')
+            def pop_fn(i, _t=t):
+                return (
+                    f'politician_zone_population'
+                    f'_zone_type_{_t}'
+                    f'/Step{i}/count')
+            self._write_xdmf_file(
+                os.path.join(
+                    subdir,
+                    f'zone_type_{t}.xdmf'),
+                f'zone_type_{t}',
+                pol_descs,
+                geom_fn,
+                'zone_population',
+                pop_fn,
+                num_steps)
+
+        # Government file.
+        gov_descs = [
+            d for d in self.hdf5.datasets
+            if d.zone_type == 'government']
+        self._write_xdmf_file(
+            os.path.join(
+                subdir, 'government.xdmf'),
+            'government',
+            gov_descs,
+            lambda i: (
+                'GlyphGeometry/government/XYZ'),
+            'government_population',
+            lambda i: (
+                f'government_population'
+                f'/Step{i}/count'),
+            num_steps)
 
 
 def _compute_sigma_ref(world, desc):
@@ -1001,19 +992,21 @@ def write_paraview_script(settings, world):
     """Generate a pvpython cylinder glyph script.
 
     Writes {settings.outfile}_glyphs.py.
+    The script loads one XDMF file per grid
+    type from the glyph subdirectory, so each
+    reader contains exactly the right points.
+    No ExtractBlock needed.
     Tune the constants at the top of the
     generated script, then run with pvpython
     or load via File -> Run Script in ParaView.
     """
     datasets = _build_glyph_datasets(
         settings, world)
-    xdmf_basename = (
+    subdir_basename = (
         os.path.basename(settings.outfile)
-        + '_glyphs.xdmf')
+        + '_glyphs')
 
     # Per-descriptor sigma normalization factors.
-    # Mean sigma across all agents so that all
-    # Gaussian types are visually comparable.
     sigma_refs = {
         d.group_name: _compute_sigma_ref(world, d)
         for d in datasets}
@@ -1051,8 +1044,10 @@ def write_paraview_script(settings, world):
       "NUM_PANES = 3  # panes to show",
       "",
       "import os as _os",
-      f"_here = _os.path.dirname(_os.path.abspath(__file__))",
-      f"XDMF_FILE = _os.path.join(_here, {xdmf_basename!r})",
+      "_here = _os.path.dirname(",
+      "    _os.path.abspath(__file__))",
+      "_subdir = _os.path.join(",
+      f"    _here, {subdir_basename!r})",
       "",
       "# (group_name, z_dir, zone_type, pop_attr)",
       "DESCRIPTORS = [")
@@ -1068,12 +1063,6 @@ def write_paraview_script(settings, world):
 
     w("]")
 
-    # SIGMA_REFS: per-group mean sigma used to
-    # normalise cylinder radius so that Gaussian
-    # types with very different sigma scales
-    # (e.g. ideal_policy vs stated_policy) are
-    # all visually comparable. Computed from the
-    # world state at script-generation time.
     w("",
       "# Per-group sigma normalization (computed",
       "# at generation time from simulation data).",
@@ -1083,7 +1072,7 @@ def write_paraview_script(settings, world):
         w(f"    {d.group_name!r}: {ref:.6g},")
     w("}",
       "",
-      "# Filter to descriptors for this run.",
+      "# Filter to active descriptors.",
       "active = [",
       "    d for d in DESCRIPTORS",
       "    if (d[2] is None",
@@ -1097,41 +1086,20 @@ def write_paraview_script(settings, world):
       "n = len(active)",
       "",
       "",
-      "def _grid_name(zone_type):",
-      "    if zone_type is None:",
-      "        return 'patches_grid'",
-      "    if zone_type == 'government':",
-      "        return 'government_grid'",
-      "    return f'zone_type_{zone_type}_grid'",
-      "",
-      "",
-      "# ---- Compatibility shims ----",
+      "# ---- Compatibility shim ----",
       "# Xdmf3ReaderS uses FileName (singular);",
       "# XDMFReader uses FileNames (plural).",
-      "# _xdmf_reader() hides the difference.",
       "try:",
       "    Xdmf3ReaderS",
       "    def _xdmf_reader(path):",
-      "        print('Using Xdmf3ReaderS')",
       "        return Xdmf3ReaderS(",
       "            FileName=[path])",
       "except NameError:",
       "    def _xdmf_reader(path):",
-      "        print('Xdmf3ReaderS not available;'",
-      "              ' falling back to XDMFReader')",
       "        return XDMFReader(",
       "            FileNames=[path])",
-      "try:",
-      "    ExtractBlockUsingDataAssembly",
-      "except NameError:",
-      "    ExtractBlockUsingDataAssembly = ExtractBlock",
       "",
       "# ---- Layout: n equal horizontal panes ----",
-      "# After SplitHorizontal(cell, f), the original",
-      "# view moves to the left child (2*cell+1) and",
-      "# the right child (2*cell+2) is empty.",
-      "# Splitting the right child repeatedly at 1/k",
-      "# fractions produces n equal-width panes.",
       "layout = GetLayout()",
       "views  = [GetActiveView()]",
       "cell = 0",
@@ -1146,41 +1114,26 @@ def write_paraview_script(settings, world):
       "    views.append(v)",
       "    cell = right",
       "",
-      "# ---- Load XDMF ----",
-      "reader = _xdmf_reader(XDMF_FILE)",
-      "UpdatePipeline(proxy=reader)",
-      "# Detect selector format. Xdmf3ReaderS",
-      "# returns no named assembly; blocks are",
-      "# then addressed as /Root/Block0 etc.",
-      "# XDMFReader populates named assembly;",
-      "# blocks are /Root/patches_grid etc.",
-      "try:",
-      "    _named = (reader.GetDataInformation()",
-      "              .GetDataAssembly()"
-      "              is not None)",
-      "except Exception:",
-      "    _named = True",
-      "print('Block selectors:',",
-      "      'named' if _named else 'indexed')",
+      "# ---- Load one reader per grid type ----",
+      "# Each XDMF file contains exactly one",
+      "# grid topology, so no ExtractBlock needed.",
+      "def _grid_key(zone_type):",
+      "    if zone_type is None:",
+      "        return 'patches'",
+      "    if zone_type == 'government':",
+      "        return 'government'",
+      "    return f'zone_type_{zone_type}'",
       "",
-      "# Block index = position in XDMF spatial",
-      "# collection. Order: patches (0), zone",
-      "# types in ascending order (1..N), then",
-      "# government (N+1). Computed at generation",
-      "# time from the world zone type count.",
-      "_BLOCK_INDEX = {",
-      "    'patches_grid': 0,")
-
-    nzt = world.num_zone_types
-    for t in range(nzt):
-        w(f"    'zone_type_{t}_grid': {t + 1},")
-    w(f"    'government_grid': {nzt + 1},",
-      "}",
-      "",
-      "def _grid_selector(name):",
-      "    if _named:",
-      "        return f'/Root/{name}'",
-      "    return f'/Root/Block{_BLOCK_INDEX[name]}'",
+      "_readers = {}",
+      "for _desc in active:",
+      "    _key = _grid_key(_desc[2])",
+      "    if _key not in _readers:",
+      "        _fname = _os.path.join(",
+      "            _subdir, _key + '.xdmf')",
+      "        _readers[_key] = _xdmf_reader(",
+      "            _fname)",
+      "        UpdatePipeline(",
+      "            proxy=_readers[_key])",
       "",
       "# ---- Pipeline per descriptor ----",
       "for idx, desc in enumerate(active):",
@@ -1191,21 +1144,15 @@ def write_paraview_script(settings, world):
       "    view  = views[idx]",
       "    SetActiveView(view)",
       "",
-      "    # Select grid block.",
-      "    eb = ExtractBlockUsingDataAssembly(",
-      "        Input=reader)",
-      "    eb.Selectors = [",
-      "        _grid_selector(_grid_name(zt))]",
+      "    reader = _readers[_grid_key(zt)]",
       "",
       "    # Calculator: cylinder scale vector.",
       "    s_arr = f'{gname}_sigma_dim{DIM}'",
       "    sigma_ref = SIGMA_REFS[gname]",
-      "    calc  = Calculator(Input=eb)",
+      "    calc  = Calculator(Input=reader)",
       "    calc.AttributeType  = 'Point Data'",
       "    calc.ResultArrayName = 'cylinder_scale'",
       "    calc.Function = (",
-      # Adjacent string literals concatenate into
-      # one argument to w(), one line per call.
       "        f'iHat*{s_arr}"
       "/{sigma_ref}*{CYLINDER_RADIUS_SCALE}'",
       "        f'+jHat*{s_arr}"

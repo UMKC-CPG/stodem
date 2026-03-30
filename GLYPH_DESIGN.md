@@ -447,34 +447,44 @@ num_zones[0], num_zones[1], ...), so they cannot
 share a single XDMF Grid entry. Each requires its
 own named `<Grid>`.
 
-**Structure**: one outer `<Grid CollectionType=
-"Temporal">` at the Domain level (matching the
-regular `stodem.xdmf` pattern). Each time step is
-a `<Grid GridType="Collection">` spatial collection
-inside the temporal collection, containing the
-named uniform grids (`patches_grid`,
-`zone_type_0_grid`, ..., `government_grid`) as
-children. This single temporal axis is required for
-ParaView's Time Manager to advance all grids
-simultaneously; multiple independent temporal
-collections at the Domain level prevent time
-stepping.
+**Structure**: one XDMF file per grid topology,
+each containing a single temporal collection of
+Uniform grids (one per step). Files are written
+into a subdirectory alongside the HDF5 file:
 
-Each named grid's `<Topology>` uses
-`NumberOfElements` read from the actual HDF5
-dataset shape at that step, not a cached constant.
+- `patches.xdmf` — citizen patch data
+- `zone_type_{t}.xdmf` — politician data per
+  zone type
+- `government.xdmf` — government data
+
+The generated ParaView script loads one reader
+per file. Because each file contains exactly one
+grid topology, no `ExtractBlock` is needed.
+
+**Why separate files**: `Xdmf3ReaderS` does not
+expose block hierarchy in the ParaView GUI (known
+unresolved bug, ParaView Discourse Dec 2019).
+With a single combined XDMF, `ExtractBlock` cannot
+isolate individual grids. Separate files give
+`Xdmf3ReaderS` one independent time series each,
+which it handles correctly, and each reader
+presents only its own points to downstream
+filters.
+
+**Time synchronization**: ParaView's Time Manager
+synchronizes all readers that share the same
+`<Time Value="..."/>` sequence. All glyph XDMF
+files use `Value="0.0"`, `"1.0"`, etc., so
+advancing time in any pane advances all.
+
+Each grid's `<Topology>` derives
+`NumberOfElements` from the actual HDF5 dataset
+shape at write time, not a cached constant.
 
 For static geometries (patches, zone_type_1 and
-higher), all timesteps reference the same HDF5
+higher), all steps reference the same HDF5
 geometry dataset. For zone_type_0, each step
 references `GlyphGeometry/zone_type_0/Step{i}/XYZ`.
-
-`ExtractBlock.Selectors = ['/Root/patches_grid']`
-works correctly with this structure: the temporal
-axis is transparent to block selection — the
-reader resolves the current time before presenting
-the spatial collection, so block names appear at
-the top level of the data assembly.
 
 ---
 

@@ -587,6 +587,7 @@
 #pudb.set_trace()
 
 import os
+import shutil
 import numpy as np
 
 from settings import ScriptSettings
@@ -1080,8 +1081,7 @@ def _prompt_overwrite(settings):
     candidates = [
         f"{settings.outfile}.hdf5",
         f"{settings.outfile}.xdmf",
-        f"{settings.outfile}_glyphs.hdf5",
-        f"{settings.outfile}_glyphs.xdmf",
+        f"{settings.outfile}_glyphs",
         f"{settings.outfile}_glyphs.py",
         "pge.plot",
         "forces.plot",
@@ -1103,7 +1103,10 @@ def _prompt_overwrite(settings):
         print("Aborted.")
         raise SystemExit(0)
     for f in existing:
-        os.remove(f)
+        if os.path.isdir(f):
+            shutil.rmtree(f)
+        else:
+            os.remove(f)
 
 
 def main():
