@@ -1,115 +1,25 @@
 # STODEM Design Document
 
+> **Document hierarchy:** This file sits in the chain VISION → ARCHITECTURE →
+> **DESIGN** → PSEUDOCODE → Code. For goals and principles, see `VISION.md`.
+> For repository layout, module map, and build system, see `ARCHITECTURE.md`.
+> For language-agnostic algorithm specifications, see `PSEUDOCODE.md`.
+
 ## 1. Purpose and Scope
 
-STODEM (Stochastic Democracy Simulation) is a multi-agent based
-simulation that models democratic processes. The simulation
-investigates whether stochastic voting can help a democracy navigate
-a high-dimensional policy space and find alignment between the
-internalized policy preferences of a population and the actual
-(unknown) policies that lead to positive outcomes.
-
-The simulation is not tied to any real-world political system. All
-policy dimensions and personality traits are abstract and carry no
-intrinsic meaning. "Extreme" and "centrist" are relative labels
-determined only by the distribution of agents.
-
-This document describes the architecture, mathematical foundations,
-agent interactions, and simulation flow. It is intended to be read
-alongside `TODO.md`, which tracks concrete implementation tasks.
+See `VISION.md`.
 
 ---
 
 ## 2. Repository Layout
 
-```
-stodem/
-  .stodem/              RC files (stodemrc.py, defaults)
-  bin/                  Installed copies of Python modules
-  build/release/        CMake build artifacts
-  jobs/
-    quickTest/          Small test case (stodem.in.xml, outputs)
-    test1/              Larger test case
-  src/
-    scripts/            Primary source code (see Module Map)
-  CMakeLists.txt        Build system (Fortran future expansion)
-  CLAUDE.md             AI assistant guidance
-  DESIGN.md             This document
-  TODO.md               Bug tracker and implementation task list
-```
+See `ARCHITECTURE.md` §1.
 
 ---
 
 ## 3. Module Map
 
-All simulation logic lives in `src/scripts/`. Each module has a
-single clear responsibility, organized here by functional group.
-
-**Entry Point and Control**
-
-- `stodem.py` — Entry point. Contains `main()`, the
-  simulation loop, `campaign()`, `vote()`, `govern()`.
-- `settings.py` (`ScriptSettings`) — XML input parsing,
-  command-line argument handling, RC file loading.
-- `sim_control.py` (`SimControl`, `SimProperty`) — Simulation
-  phase counts, total step computation, data range
-  computation, property dataclass.
-
-**World and Spatial Structure**
-
-- `world.py` (`World`) — Top-level container. Creates
-  patches, zones, citizens, politicians, government.
-  Computes patch-level output fields via
-  `compute_patch_well_being()`,
-  `compute_patch_gaussian_stats()`, and
-  `compute_patch_politician_stats()`.
-- `zone.py` (`Zone`) — Geographic region at one hierarchy
-  level. Maintains politician lists and citizen zone
-  averages.
-- `patch.py` (`Patch`) — Basic grid unit. Knows its (x,y)
-  location, zone membership, and resident citizen indices.
-
-**Agents**
-
-- `citizen.py` (`Citizen`) — Agent with Gaussian policy/trait
-  preferences, aversions, and ideal positions. Computes
-  overlap integrals and voting logic.
-- `politician.py` (`Politician`) — Agent with innate and
-  external policy/trait positions. Strategies for movement,
-  adaptation, and campaigning.
-- `government.py` (`Government`) — Holds enacted policy
-  Gaussians that affect citizen well-being.
-
-**Mathematics and Infrastructure**
-
-- `gaussian.py` (`Gaussian`) — Complex Gaussian
-  representation with overlap integral computation.
-- `random_state.py` — Global `rng` instance (numpy
-  `default_rng`, seed=8675309).
-- `output.py` (`Hdf5`, `Xdmf`, `GlyphHdf5`,
-  `GlyphXdmf`, `write_paraview_script`) — Regular-grid
-  and glyph-format output for Paraview visualization.
-  See §12 for full description.
-
-### Dependency Graph
-
-```
-stodem.py
-  +-- settings.py
-  +-- sim_control.py
-  +-- world.py
-  |     +-- patch.py
-  |     +-- zone.py ----------+-- gaussian.py
-  |     +-- citizen.py -------+-- gaussian.py
-  |     +-- politician.py ----+-- gaussian.py
-  |     +-- government.py ----+-- gaussian.py
-  |     +-- sim_control.py (SimProperty)
-  |     +-- random_state.py
-  +-- output.py
-```
-
-All modules that use randomness import the shared `rng` from
-`random_state.py` to ensure reproducibility from a single seed.
+See `ARCHITECTURE.md` §2.
 
 ---
 
@@ -1717,295 +1627,297 @@ to support the additional fields.
 
 ### 12.3 Glyph Output (HDF5)
 
-A companion glyph HDF5 file (`{prefix}_glyphs.hdf5`) encodes
-each Gaussian type as a **Polyvertex point cloud** — one point
-per patch — for compact arrow-glyph visualization in Paraview.
-The `GlyphHdf5` class manages this file.
+All glyph output files live in a subdirectory
+`{prefix}_glyphs/` for easy drag-and-drop transfer
+to another machine. The `GlyphHdf5` class manages
+`{prefix}_glyphs.hdf5` inside this subdirectory.
 
-**Motivation**: The regular-grid output maps each Gaussian
-parameter to a scalar field on the patch grid, requiring
-separate colour maps for mu, sigma, and theta. The glyph
-output compresses all three parameters of a Gaussian into
-a single arrow per patch: colour encodes mu and engagement,
-length encodes certainty. A preference/aversion pair is
-visually separated by a ±0.25 patch-unit Z offset, making
-both types readable simultaneously.
+**Motivation**: The regular-grid output (§12.1) maps
+each Gaussian parameter to a separate scalar field,
+requiring manual colour-map wiring in ParaView. The
+glyph output compresses all three parameters into a
+single **cylinder** per point: colour encodes mu and
+engagement, radius encodes spread (sigma), and height
+encodes population weight. This provides an immediate
+visual read of the Gaussian landscape.
 
-**Point layout**: Patch (i, j) maps to linear index
-`i*NY + j` (C-order ravel). For each Z level,
-`XYZ[i*NY+j] = (float(i), float(j), z_offset)`.
-Three static geometry arrays are written once at
-initialization (shared by all blocks and all time steps):
+**Multi-pane philosophy**: The user loads specific
+subsets into separate ParaView panes rather than
+viewing all data in one visualization. One pane might
+show citizen preference averages for policy dim N;
+another shows politician averages for the same dim.
+This provides selective visibility without clutter.
+All Gaussian type groups coexist in the HDF5 file;
+separate XDMF files (§12.4) are needed only where
+the topology differs.
 
-| Key | Z offset | Used for |
-|---|---|---|
-| `GlyphGeometry/z_pos/XYZ` | +0.25 | Preference / innate Gaussians |
-| `GlyphGeometry/z_neg/XYZ` | −0.25 | Aversion / external Gaussians |
-| `GlyphGeometry/z_zero/XYZ` | 0.0 | Ideal policy, government policy |
+#### Cylinder encoding
 
-**Glyph blocks**: Each Gaussian type is a named HDF5 group.
-Per-step data lives in sub-groups `Step0`, `Step1`, etc.
-Four arrays per dimension `d`:
+- **Height = population.** Citizen counts per patch
+  (or per zone for politicians) normalized by the
+  total world population (fixed for the run), giving
+  values in [0, 1]. Government height is always 1.0.
+  `POPULATION_SCALE` (tunable in the ParaView
+  script) controls the visual height in world units.
+  Default: `0.3 * num_patches`, which makes the
+  average patch glyph ~0.3 grid units tall.
 
-| Array | Meaning |
-|---|---|
-| `mu_d{d}` | Patch-averaged Gaussian centre |
-| `inv_sigma_d{d}` | `sigma_ref / sigma` — larger = sharper/more certain |
-| `cos_theta_d{d}` | `|cos(theta)|` in [0,1] — larger = more engaged |
-| `color_d{d}` | Pre-computed float32 RGB `(N,3)` — see §12.5 |
+- **Radius = sigma.** Raw sigma stored in HDF5. At
+  display time, the ParaView script normalizes by a
+  per-group `SIGMA_REFS` value (mean sigma across
+  all agents for that Gaussian type, computed at
+  script-generation time). This normalization is
+  needed because Gaussian types have wildly different
+  sigma scales (e.g., ideal_policy sigma ≈ 0.001–
+  0.014 vs. stated_policy sigma ≈ 0.05–3.5).
+  `CYLINDER_RADIUS_SCALE` multiplies the normalized
+  value for the final visual radius. Default: 0.3.
 
-`sigma_ref` equals the `*_stddev_stddev` XML parameter used
-to initialize that Gaussian type, so `inv_sigma ≈ 1.0` for a
-typical agent regardless of Gaussian type (half-normal mean
-`= 0.798 × stddev`, giving `sigma_ref/mean ≈ 1.25`).
+- **Colour = mu via diverging hue.** Blue (negative
+  mu) → white/gray (mu = 0) → red (positive mu).
+  Saturation = |cos_theta|: full colour when
+  engaged, desaturated toward gray when apathetic.
+  The neutral pole at mu = 0 and apathetic gray
+  coincide naturally — both map to gray.
 
-**Blocks** (18 total for `num_zone_types=2`,
-`num_policy_dims=3`, `num_trait_dims=3`):
+- **Spatial orientation.** The patch grid occupies
+  the x-y plane. Cylinder bases sit at z = 0:
+  - Preference cylinders: tip at +z
+  - Aversion cylinders: tip at -z
 
-| Block tag | Z | Gaussian type |
-|---|---|---|
-| `cit_pol_pref` | z_pos | Citizen policy stated preference |
-| `cit_pol_aver` | z_neg | Citizen policy stated aversion |
-| `cit_pol_ideal` | z_zero | Citizen ideal policy preference |
-| `cit_trt_pref` | z_pos | Citizen trait stated preference |
-| `cit_trt_aver` | z_neg | Citizen trait stated aversion |
-| `pol_inn_pol_pref_zt{zt}` | z_pos | Politician innate policy preference |
-| `pol_inn_pol_aver_zt{zt}` | z_neg | Politician innate policy aversion |
-| `pol_ext_pol_pref_zt{zt}` | z_pos | Politician external policy preference |
-| `pol_ext_pol_aver_zt{zt}` | z_neg | Politician external policy aversion |
-| `pol_inn_trt_zt{zt}` | z_pos | Politician innate trait |
-| `pol_ext_trt_zt{zt}` | z_neg | Politician external trait |
-| `gov_pol` | z_zero | Government enacted policy |
+  This creates a 3D landscape: preferences spike up,
+  aversions spike down, apathy and scarcity flatten
+  toward the patch plane. Visually readable at a
+  glance. (Ideal policy cylinder direction: open
+  design question — see TODO.md.)
 
-Politician blocks repeat for each zone type `zt`. Government
-values are scalars (one per policy dim) replicated to all
-`NX*NY` patch points.
+#### Colour storage
 
-**Empty-patch handling**: Empty patches have `sigma=0` and
-`cos_theta=0` from the averaging step. `inv_sigma` is clipped
-to a minimum of `1e-9` to avoid division by zero; the
-`cos_theta=0` forces `color_d{d}` saturation to zero (grey)
-for these points regardless of glyph size.
+Per-point RGB is pre-computed from mu and |cos_theta|
+by `_mu_to_rgb()` in `output.py` and written to HDF5
+as `color_rgb_dim{d}`, shape (N, 3), float32, values
+in [0, 1]. Hue derives from a sigmoid of mu;
+saturation combines |cos_theta| with absolute hue
+distance from neutral so mu = 0 always maps to gray.
+ParaView reads this as a Vector attribute and colours
+the glyph directly (MapScalars = 0, no LUT).
+
+#### Per-zone-instance politician storage
+
+Politician glyphs are stored at zone resolution, not
+at patch resolution. Each dataset in a politician
+group has shape `[num_zones[t]]` where t is the zone
+type index. This contrasts with the regular output
+(§12.1), which broadcasts politician values across
+all patches in the zone. For glyph visualization,
+per-zone-instance storage is more meaningful: one
+cylinder per district or state.
+
+Glyph positions are zone centroids (mean x, y of
+member patches). Zone_type_0 (districts) centroids
+are written per step because district boundaries
+may shift. Zone_type_1 and higher are static
+(written once). Government geometry is a single
+point at the world centroid.
+
+#### HDF5 file structure
+
+```
+{prefix}_glyphs/{prefix}_glyphs.hdf5
+│
+├── GlyphGeometry/
+│   ├── patches/           (static)
+│   │   └── XYZ  (num_patches, 3)
+│   ├── zone_type_0/       (per-step)
+│   │   ├── Step0/
+│   │   │   └── XYZ  (num_zones[0], 3)
+│   │   └── ...
+│   ├── zone_type_{t}/     (static, t >= 1)
+│   │   └── XYZ  (num_zones[t], 3)
+│   └── government/        (static)
+│       └── XYZ  (1, 3)
+│
+├── citizen_policy_pref/   (z_pos)
+│   ├── Step0/
+│   │   ├── mu_dim{d}        (num_patches,)
+│   │   ├── sigma_dim{d}     (num_patches,)
+│   │   ├── cos_theta_dim{d} (num_patches,)
+│   │   └── color_rgb_dim{d} (num_patches, 3)
+│   └── ...
+├── citizen_policy_aver/   (z_neg)
+├── citizen_policy_ideal/  (z_pos, dir TBD)
+├── citizen_trait_pref/    (z_pos)
+├── citizen_trait_aver/    (z_neg)
+│
+├── citizen_patch_population/
+│   ├── Step0/
+│   │   └── count  (num_patches,) [0,1]
+│   └── ...
+│
+├── politician_{kind}_zone_type_{t}/
+│   (6 groups per zone type:
+│    innate_policy_pref, innate_policy_aver,
+│    external_policy_pref, external_policy_aver,
+│    innate_trait, external_trait.
+│    Shapes: (num_zones[t],) per dataset.)
+│
+├── politician_zone_population_zone_type_{t}/
+│   ├── Step0/
+│   │   └── count  (num_zones[t],) [0,1]
+│   └── ...
+│
+├── government_policy/     (z_pos)
+│   (shapes (1,) or (1, 3) for color_rgb)
+│
+└── government_population/
+    ├── Step0/
+    │   └── count  (1,) always 1.0
+    └── ...
+```
+
+All arrays are float32. Population counts sum to
+≈ 1.0 across patches (citizens) or across zones
+(politicians). Government population is always 1.0.
 
 **Output cadence**: Glyph data is written at the same
-frequency as the regular HDF5 data — every campaign step and
-every govern step.
+frequency as the regular HDF5 data — every campaign
+step and every govern step.
 
 ### 12.4 Glyph Output (XDMF)
 
-A companion glyph XDMF file (`{prefix}_glyphs.xdmf`) describes
-the structure of the glyph HDF5 file for Paraview. The
-`GlyphXdmf` class manages this file.
+The `GlyphXdmf` class writes **separate XDMF files
+per grid topology** into the `{prefix}_glyphs/`
+subdirectory:
 
-Structure: a temporal collection containing one **spatial
-collection** per output step. Each spatial collection contains
-one Uniform Polyvertex grid per Gaussian type (block). Each
-grid's geometry points to the shared static XYZ array for
-its Z level (z_pos, z_neg, or z_zero). Per-step scalar
-attributes (`mu_d{d}`, `inv_sigma_d{d}`, `cos_theta_d{d}`)
-point into the corresponding step sub-group of the HDF5 file.
+| File | Grid | Points |
+|---|---|---|
+| `patches.xdmf` | Citizen patch data | num_patches |
+| `zone_type_{t}.xdmf` | Politician zone type t | num_zones[t] |
+| `government.xdmf` | Government data | 1 |
 
-Written after the simulation completes (same rationale as
-the regular XDMF — step count must match HDF5 datasets).
+**Why separate files**: `Xdmf3ReaderS` does not
+expose block hierarchy in the ParaView GUI (known
+unresolved bug, ParaView Discourse Dec 2019). With a
+single combined XDMF, `ExtractBlock` cannot isolate
+individual grids. Separate files give `Xdmf3ReaderS`
+one independent time series each, which it handles
+correctly.
+
+**Structure**: Each file contains a single temporal
+collection of Uniform grids (one per step). Each
+inner grid has `Polyvertex` topology with
+`NumberOfElements` derived from the actual HDF5
+dataset shape at write time (not a cached constant).
+Geometry references are static for patches,
+zone_type_1+, and government; per-step for
+zone_type_0.
+
+**Time synchronization**: All glyph XDMF files use
+`Value="0.0"`, `"1.0"`, etc. ParaView's Time Manager
+synchronizes all readers sharing the same time
+sequence, so advancing time in any pane advances all.
+
+Written after the simulation completes (same
+rationale as the regular XDMF — step count must
+match HDF5 datasets).
 
 ### 12.5 ParaView Visualization Script
 
-A pvpython script (`{prefix}_paraview.py`) is generated by
-`write_paraview_script(settings, world)` and written
-immediately after the glyph XDMF file. It is designed to be
-run directly as `pvpython {prefix}_paraview.py` and sets up
-a ready-to-use three-pane glyph visualization without
-manual configuration.
+A pvpython script (`{prefix}_glyphs.py`) is generated
+by `write_paraview_script(settings, world)`. It is
+designed to be run as `pvpython {prefix}_glyphs.py`
+or via File → Run Script in ParaView.
 
-**Why generate rather than provide a static script**: The
-script must embed simulation-specific parameters that are only
-known at run time — the absolute path to the glyph XDMF file,
-`NUM_POLICY_DIMS`, `NUM_TRAIT_DIMS`, `NUM_ZONE_TYPES`, `NX`,
-`NY`, and camera position. These cannot be templated in a
-static file without additional configuration steps.
+**Why generate**: The script must embed simulation-
+specific parameters known only at run time: per-group
+`SIGMA_REFS` normalization factors, `POPULATION_SCALE`
+(which depends on `num_patches`), the subdirectory
+name, and the descriptor list.
 
-**Layout**: Three horizontal panes side by side.
+**Layout**: A `NUM_ROWS × NUM_COLS` grid of panes
+(default 2 × 3). Each pane shows one Gaussian type
+group for the selected dimension. The descriptor list
+is filtered to the active `ZONE_TYPE` and truncated
+to fit the grid.
 
-| Pane | Content |
-|---|---|
-| Left — Citizens | Policy pref/aver pair (`show_pair`) + ideal policy glyph |
-| Middle — Politicians | Innate pref/aver pair + external pref/aver pair for `ZONE_TYPE` |
-| Right — Government | Enacted policy glyph |
+**Per-pane pipeline**:
 
-**Glyph encoding in the script**:
+1. **Reader**: One `Xdmf3ReaderS` per grid type file
+   (shared across panes that use the same topology).
+   No `ExtractBlock` needed.
 
-- Arrow direction: preference/innate → +Z (pointing toward
-  viewer from z=+0.25); aversion/external → −Z (pointing away
-  from viewer from z=−0.25); ideal/enacted → +X (horizontal,
-  at z=0). Direction is set via `GlyphTransform.Rotate =
-  [0, -90*z_sign, 0]` applied to the default +X arrow.
-  `Orient=False` (disabled) so direction comes only from the
-  transform, not from a data vector.
-- Arrow length: scaled by `inv_sigma_d{DIM}` (longer =
-  more certain).
-- Arrow colour: pre-computed float32 RGB stored in
-  `color_d{DIM}` (one `(N,3)` array per block per step).
-  Hue encodes mu via a sigmoid: `t = 1/(1+exp(-mu))`;
-  t < 0.5 → blue (negative), t > 0.5 → red (positive),
-  t = 0.5 → white (neutral/zero). Saturation encodes
-  engagement: `sat = |cos_theta| * (2|t-0.5|)` — vivid
-  when the agent is both engaged and opinionated, grey when
-  apathetic or centrist. Value = 1.0 always. Rendered via
-  `rep.MapScalars = 0` (direct RGB, no LUT applied).
+2. **Programmable Filter**: Assembles the per-point
+   scale vector `[r, r, h]` where
+   `r = sigma / SIGMA_REFS[group] *
+   CYLINDER_RADIUS_SCALE` and
+   `h = population * POPULATION_SCALE`. Also passes
+   through the pre-computed `color_rgb` array. The
+   filter's script is editable in the ParaView GUI
+   to switch GROUP, DIM, or Z_DIR at runtime.
 
-**User-adjustable parameters** at the top of the generated
-script:
+3. **Cylinder Glyph**: VectorScaleMode = Scale by
+   Components using `cylinder_scale`. GlyphTransform
+   applies Scale → Rotate → Translate:
+   - `Scale = [2, 1, 2]` normalizes VTK cylinder
+     radius from 0.5 to 1.
+   - `Rotate = [90, 0, 0]` for z_pos groups,
+     `[-90, 0, 0]` for z_neg (aligns axis with ±Z).
+   - `Translate = [0, 0, 0.5]` for z_pos,
+     `[0, 0, -0.5]` for z_neg (base at data point).
+
+4. **Colouring**: `color_rgb` with `MapScalars = 0`
+   (direct RGB, no LUT).
+
+5. **Camera**: Orthographic top-down (+Z).
+
+**User-adjustable constants** at the top of the
+generated script:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `DIM` | 0 | Policy/trait dimension to display |
-| `ZONE_TYPE` | 0 | Politician zone type for the middle pane |
-| `GLYPH_SCALE` | 0.3 | Overall arrow size multiplier |
-
-**Camera**: Orthographic projection looking down +Z, centred
-over the patch grid. `CameraParallelScale = max(NX, NY) / 2`.
-
-Tested with ParaView 6.0.1. The `ExtractBlock.Selectors`
-path `/Root/{name}` selects blocks by name from the
-`Xdmf3ReaderT` output. If block paths differ in other
-Paraview versions, inspect the Pipeline Browser and adjust
-the `extract()` helper function.
+| `POPULATION_SCALE` | `0.3 * num_patches` | Cylinder height scale |
+| `CYLINDER_RADIUS_SCALE` | 0.3 | Cylinder radius multiplier |
+| `DIM` | 0 | Policy/trait dimension |
+| `ZONE_TYPE` | 0 | Politician zone type |
+| `NUM_ROWS` | 2 | Grid layout rows |
+| `NUM_COLS` | 3 | Grid layout columns |
 
 ---
 
 ## 13. Randomness and Reproducibility
 
-All random number generation uses a single shared `rng`
-instance (numpy `default_rng` with seed 8675309), imported
-from `random_state.py` by every module that needs randomness.
-This ensures full reproducibility given the same seed and
-execution order.
+See `ARCHITECTURE.md` §3.
 
 ---
 
 ## 14. Build System
 
-CMake is used for installation (copying scripts to
-`$STODEM_DIR/bin`) and for future Fortran expansion. The
-primary simulation is pure Python and does not require
-compilation. Dependencies: Python 3, numpy, h5py, lxml.
-Optional: Fortran compiler (gfortran or ifort) for future
-expansion.
+See `ARCHITECTURE.md` §4.
 
 ---
 
-## 15. Known Architectural Issues
+## 15. Known Design Limitations
 
-No open architectural issues. All previously tracked
-issues (TODO #8, #17, #18, #19, #20 and others) are
-resolved — see `TODO.md` Resolved Items.
+No open architectural issues. All previously tracked issues (TODO #8,
+#17, #18, #19, #20 and others) are resolved — see `TODO.md` Archive.
 
-The one remaining known limitation is that the govern
-phase forces still have no hard cap on the per-step
-movement of `Pge` (a `governance_rate` parameter is
-described as a future extension in §7.5.3). The
-current combination of population normalization and
-bounded mandate (§7.5.1) keeps forces in the O(10^-2)
-range for typical world configurations, but very
-large worlds or extreme margin/mandate values could
-still produce large per-step shifts. This is noted
-as a future parameter rather than an active bug.
+The one remaining known limitation is that the govern phase forces
+still have no hard cap on the per-step movement of `Pge` (a
+`governance_rate` parameter is described as a future extension in
+§7.5.3). The current combination of population normalization and
+bounded mandate (§7.5.1) keeps forces in the O(10⁻²) range for
+typical world configurations, but very large worlds or extreme
+margin/mandate values could still produce large per-step shifts.
+This is noted as a future parameter rather than an active bug.
 
 ---
 
 ## 16. Development Checkpoints (Git Tags)
 
-Design iterations are recorded as git tags so that any
-baseline can be restored if an implementation attempt
-goes poorly. Use a tag before starting any significant
-implementation effort.
-
-### Creating a checkpoint
-
-```bash
-git add <files>
-git commit -m "Description of design baseline"
-git tag <tag-name>
-```
-
-Example tags used in this project:
-- `glyph-design-v2` — cylinder glyph design complete,
-  old glyph code removed, ready for fresh implementation
-
-### Retreating to a checkpoint
-
-To restore specific files to a tagged state (stays on
-the current branch, files are staged):
-
-```bash
-git checkout <tag-name> -- \
-    src/scripts/output.py \
-    src/scripts/stodem.py \
-    GLYPH_DESIGN.md \
-    GLYPH_TODO.md
-git commit -m "Revert to <tag-name> design baseline"
-```
-
-Only the listed files are affected. Other files
-(newly created test outputs, helper modules, etc.)
-are left untouched and must be cleaned up manually
-if needed.
-
-### Inspecting a checkpoint without changing anything
-
-```bash
-# View a single file at the tag
-git show <tag-name>:src/scripts/output.py | less
-
-# Compare tagged version to current working file
-git diff <tag-name> -- src/scripts/output.py
-```
-
-### Starting a fresh attempt on a new branch
-
-```bash
-git checkout -b glyph-retry-v3 <tag-name>
-```
-
-This creates a new branch rooted at the tag, leaving
-`main` untouched.
+See `ARCHITECTURE.md` §5.
 
 ---
 
 ## 17. Design Principles
 
-1. **Abstract dimensions**: All policy and personality trait
-   dimensions are abstract. The simulation makes no assumption
-   about what they represent. Meaning emerges from agent
-   interactions.
-
-2. **Engagement as a first-class quantity**: Engagement
-   (theta) is not a separate boolean or scalar. It is built
-   into the Gaussian representation itself via the complex
-   orientation, making it inseparable from the agent's position
-   and spread on every issue.
-
-3. **Trait gates policy**: Personality determines
-   susceptibility to policy influence. This creates rich
-   emergent dynamics where politicians can shift policy
-   views only through citizens who find them personally
-   agreeable, while alienated citizens become more rigid.
-
-4. **Symmetric engagement from asymmetric alignment**: Both
-   agreement and disagreement increase engagement. Only
-   indifference (weak overlap) leaves engagement unchanged.
-   This prevents the common modeling pitfall where only
-   positive interactions create participation.
-
-5. **Separation of ideal and stated preferences**: Citizens
-   can hold stated preferences that do not serve their actual
-   interests. The gap between stated and ideal preferences
-   creates the core tension of the simulation: democracy
-   must navigate this gap to find good outcomes.
-
-6. **Accumulate-then-apply influence**: Influence from all
-   sources (politicians, citizen collective, well-being) is
-   accumulated into shift arrays before being applied. This
-   prevents order-of-evaluation artifacts where the first
-   influence source processed has a different effect than the
-   last.
+See `VISION.md` (Design Principles).

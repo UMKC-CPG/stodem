@@ -2,15 +2,53 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-## Read the DESIGN.md file.
+## Document Hierarchy
 
-This file will present the high level architectural design of the program.
-It will also provide nuanced understanding of specific design decisions.
-It is intended to serve as the main thinking space for program design, but it should be intimately linked to the contents of the TODO.md file (discussed next) so that architecture and design decisions have clear connections to specific and actionionable development tasks.
+This project uses a five-level document chain.
+All design documents live in `dev/`. Read them in
+order when starting work:
 
-## Read the TODO.md file.
+1. `dev/VISION.md` — goals, principles, non-negotiables
+2. `dev/ARCHITECTURE.md` — layout, modules, dependencies
+3. `dev/DESIGN.md` — algorithms, data structures, math
+4. `dev/PSEUDOCODE.md` — language-agnostic algorithm specs
+5. Source code in `src/scripts/`
 
-This file describes detailed action items that are oriented toward specific program code and implementation tasks. The intent is for the action items here are derived from and linked to the effective difference between the DESIGN.md document and the current state of the implementation of the program.
+`dev/TODO.md` tracks tasks organized by level. Use
+`/focus` to start a session and `/refine` to check
+consistency across the chain.
+
+## Level Awareness
+
+During development conversations, the programmer may
+shift between levels of the design chain without
+explicitly noticing. For example, a discussion about
+a code fix may drift into questioning an algorithm's
+design, or a design discussion may surface a conflict
+with a core principle.
+
+When you notice the conversation has moved to a
+different level than where it started, say so briefly.
+For example: "This sounds like it's becoming an
+ARCHITECTURE question — should we capture it there
+before continuing with the code?" The goal is
+awareness, not interruption. Let the programmer
+decide whether to switch context, propagate the
+change to the appropriate document, or stay focused
+and defer.
+
+Do not enforce rigid boundaries. The levels exist to
+organize thinking, not to prevent it. A developer
+who is on a productive train of thought should not
+be stopped — but when the thought resolves, help
+them recognize which documents it touches so nothing
+is left inconsistent.
+
+## Coding Style
+
+Lines must be <= 80 characters. Each line should be filled as long as
+possible without exceeding 80. Writing a 40-char line when 75 characters
+were available is just as wrong as exceeding 80. Fill lines to the limit.
 
 ## Project Overview
 
@@ -93,7 +131,7 @@ main() → for each cycle:
 
 ### Core Interaction Physics
 
-Full architectural design is in `DESIGN.md`. Design
+Full architectural design is in `dev/DESIGN.md`. Design
 comments also in `stodem.py` (line 226+). Key principles:
 
 - **Trait gates policy**: Trait overlap magnitude determines how much policy positions shift; trait overlap sign determines the type of shift (attraction vs. defensive rigidity)
@@ -149,7 +187,7 @@ Key sections:
 
 ## Known Issues
 
-See `TODO.md` for resolved items. All previously
+See `dev/TODO.md` for resolved items. All previously
 active tasks have been implemented. Remaining
 deferred item:
 - Primary campaign/vote phases not implemented
