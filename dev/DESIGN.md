@@ -2108,8 +2108,9 @@ points in `stodem.py`:
 
 A third call, `viz.finalize()`, is placed after
 the simulation loop completes, alongside the
-existing XDMF and HDF5 finalization. It is a
-no-op for the interactive display.
+existing XDMF and HDF5 finalization. It transitions
+the window into interactive replay mode (see the
+Frame recording and Replay controls sections below).
 
 #### Performance considerations
 
@@ -2140,6 +2141,81 @@ The visualization requires `pyqtgraph` and a Qt
 binding (`PyQt5`, `PyQt6`, or `PySide6`). These
 are not needed for normal simulation runs — the
 module is only imported when `-d` is active.
+
+#### Frame recording
+
+During each `update()` call, a compact snapshot of the current
+rendering state is appended to an internal frame list before
+curves are painted. A single recorded frame stores the step
+label string — displayed in the title bar during replay to
+identify the simulation phase and step number — along with the
+(mu, sigma, theta_imag) triple for every curve, which fully
+determines projected shape and engagement colour.
+
+Frames are stored as a Python list of dicts, where each dict
+maps a curve identity key — the tuple (agent_type, agent_index,
+gaussian_tag, dim_index) — to its three-float triple. This
+representation decouples recording from rendering: the same
+`_update_curve()` method handles both live and replayed frames
+without branching.
+
+Memory footprint: a quickTest-scale simulation with roughly
+50 agents × 5 Gaussians × 2 dimensions produces about 500
+curves per frame, each storing three floats (24 bytes), for a
+total of roughly 12 KB per frame. Even 10,000 frames consume
+only ~120 MB — well within working memory for a debug tool
+running on developer machines.
+
+#### Replay controls
+
+When the simulation completes, `finalize()` transitions the
+window into an interactive replay mode. The existing plot grid
+remains in place; a horizontal control bar is appended below
+it with the following widgets:
+
+| Control       | Widget    | Shortcut |
+|---------------|-----------|----------|
+| Play / Resume | Button    | Space    |
+| Step backward | Button    | Left     |
+| Step forward  | Button    | Right    |
+| Reverse play  | Button    | R        |
+| Jump to start | —         | Home     |
+| Jump to end   | —         | End      |
+| Scrubber      | QSlider   | —        |
+| Speed adjust  | ± Buttons | Up/Down  |
+| Frame label   | QLabel    | —        |
+
+**Auto-play**: A QTimer fires at the current speed setting,
+advancing (or reversing) one frame per tick. When the last
+frame is reached in forward play (or the first frame during
+reverse), playback pauses automatically. The timer interval
+is derived from the current speed multiplier. Space resumes
+in whichever direction was last active (forward or reverse);
+R always starts reverse play regardless of the current state.
+
+**Scrubber**: A QSlider spanning [0, num_frames − 1] allows
+direct access to any recorded frame. Dragging the slider
+updates the display in real time. During auto-play the slider
+thumb tracks the current frame position; programmatic slider
+updates must block the change signal to prevent a feedback
+loop that would immediately stop playback.
+
+**Frame label**: A QLabel displays the recorded step label and
+a frame counter (e.g., "Campaign  Cycle 0  Step 3 — Frame
+42 / 318"). This provides temporal context when the developer
+scrubs through recorded simulation history.
+
+**Rendering**: Replay calls `_render_frame(index)`, which
+reads the stored triples for the requested frame and invokes
+`_update_curve()` for each curve — the identical rendering
+path used during the live simulation run. No separate replay
+renderer is needed.
+
+**Speed control**: Playback rate begins at the original
+`viz_delay` interval. Up/Down arrow keys (or the ± buttons)
+double or halve the inter-frame interval, providing logarithmic
+speed control. The current speed multiplier is shown alongside
+the frame label so the developer always knows the current rate.
 
 ---
 

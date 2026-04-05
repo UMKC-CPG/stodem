@@ -27,7 +27,7 @@ import time
 
 import numpy as np
 import pyqtgraph as pg
-from pyqtgraph.Qt import QtWidgets
+from pyqtgraph.Qt import QtCore, QtGui, QtWidgets
 
 
 # -----------------------------------------------
@@ -220,6 +220,7 @@ class PolicySpaceViz:
             "STODEM — Policy/Trait Space")
         grid_layout = QtWidgets.QGridLayout()
         self.window.setLayout(grid_layout)
+        self._grid_layout = grid_layout
 
         # Build a 2-row grid of PlotWidgets.
         #   Row 0: one per policy dimension.
@@ -276,11 +277,36 @@ class PolicySpaceViz:
         #   rendered each frame.
         self._create_all_curves()
 
+        # Build a colour/style legend in the top-left policy subplot.
+        # Four invisible reference curves — one per agent type — carry
+        # the base colour and line width at full engagement, giving the
+        # developer vivid anchors to identify faded curves at a glance.
+        legend_entries = [
+            ("Citizen pref/aver", CITIZEN_RGB, 1),
+            ("Ideal policy", IDEAL_RGB, 1),
+            ("Politician ext", POLITICIAN_RGB, 1),
+            ("Government enacted", GOVERNMENT_RGB, 2),
+        ]
+        legend_host = self.plots[0][0]
+        legend_host.addLegend(offset=(10, 10))
+        for label, rgb, width in legend_entries:
+            legend_host.plot(
+                [], [],
+                pen=pg.mkPen(
+                    color=rgb, width=width),
+                name=label)
+
         # Show the window and flush an initial
         #   paint so the layout is visible before
         #   the simulation loop begins.
         self.window.show()
         self.app.processEvents()
+
+        # Frame recording list for post-run
+        # replay. Each entry is a dict mapping
+        # curve identity keys to (mu, sigma,
+        # theta_imag) triples (§8.7).
+        self.frames = []
 
     # -------------------------------------------
     # Curve pre-creation.
@@ -510,6 +536,10 @@ class PolicySpaceViz:
                 enacted.theta[dim].imag,
                 GOVERNMENT_RGB, 2)
 
+        # Record a snapshot of the current state
+        # for post-run replay (§8.7).
+        self._record_frame(step_label)
+
         # Flush the Qt event loop to paint the
         #   updated curves. Then throttle by
         #   looping on processEvents() until the
@@ -525,11 +555,486 @@ class PolicySpaceViz:
                 time.sleep(0.01)
 
     # -------------------------------------------
-    # Finalize — no-op for interactive mode.
+    # Frame recording (PSEUDOCODE §8.7).
+    # -------------------------------------------
+
+    def _record_frame(self, step_label):
+        """Record a compact snapshot of the
+        current rendering state for post-run
+        replay.
+
+        Each snapshot stores the step label and
+        the (mu, sigma, theta_imag) triple for
+        every agent Gaussian — just enough to
+        reproduce the display through the same
+        _update_curve() path used during the live
+        simulation run.
+
+        Parameters
+        ----------
+        step_label : str
+            Simulation phase and step string
+            shown in the title bar during replay.
+        """
+        snapshot = {"label": step_label}
+
+        for cit_idx, citizen in enumerate(
+                self.world.citizens):
+            pref = citizen.stated_policy_pref
+            aver = citizen.stated_policy_aver
+            ideal = citizen.ideal_policy_pref
+            for dim in range(self.n_policy):
+                snapshot[("cit", cit_idx,
+                    "pp", dim)] = (
+                    pref.mu[dim],
+                    pref.sigma[dim],
+                    pref.theta[dim].imag)
+                snapshot[("cit", cit_idx,
+                    "pa", dim)] = (
+                    aver.mu[dim],
+                    aver.sigma[dim],
+                    aver.theta[dim].imag)
+                snapshot[("cit", cit_idx,
+                    "ip", dim)] = (
+                    ideal.mu[dim],
+                    ideal.sigma[dim],
+                    ideal.theta[dim].imag)
+
+            tpref = citizen.stated_trait_pref
+            taver = citizen.stated_trait_aver
+            for dim in range(self.n_trait):
+                snapshot[("cit", cit_idx,
+                    "tp", dim)] = (
+                    tpref.mu[dim],
+                    tpref.sigma[dim],
+                    tpref.theta[dim].imag)
+                snapshot[("cit", cit_idx,
+                    "ta", dim)] = (
+                    taver.mu[dim],
+                    taver.sigma[dim],
+                    taver.theta[dim].imag)
+
+        for pol_idx, politician in enumerate(
+                self.world.politicians):
+            pref = politician.ext_policy_pref
+            aver = politician.ext_policy_aver
+            for dim in range(self.n_policy):
+                snapshot[("pol", pol_idx,
+                    "pp", dim)] = (
+                    pref.mu[dim],
+                    pref.sigma[dim],
+                    pref.theta[dim].imag)
+                snapshot[("pol", pol_idx,
+                    "pa", dim)] = (
+                    aver.mu[dim],
+                    aver.sigma[dim],
+                    aver.theta[dim].imag)
+
+            trait = politician.ext_trait
+            for dim in range(self.n_trait):
+                snapshot[("pol", pol_idx,
+                    "tr", dim)] = (
+                    trait.mu[dim],
+                    trait.sigma[dim],
+                    trait.theta[dim].imag)
+
+        enacted = (
+            self.world.government.enacted_policy)
+        for dim in range(self.n_policy):
+            snapshot[("gov", 0,
+                "ge", dim)] = (
+                enacted.mu[dim],
+                enacted.sigma[dim],
+                enacted.theta[dim].imag)
+
+        self.frames.append(snapshot)
+
+    # -------------------------------------------
+    # Replay mode (PSEUDOCODE §8.8).
     # -------------------------------------------
 
     def finalize(self):
-        """No-op — retained for interface
-        consistency with the stodem.py call site.
+        """Transition to interactive replay mode.
+
+        After the simulation loop completes, this
+        method builds a transport control bar with
+        play / pause, step, reverse, scrub, and
+        speed controls below the existing plot
+        grid. It then enters the Qt event loop so
+        the developer can explore the recorded
+        simulation history interactively. All
+        rendering goes through _update_curve() to
+        ensure visual consistency between live
+        and replayed frames.
         """
-        pass
+        if not self.frames:
+            return
+
+        # --- Replay state -----------------------
+        self._current_frame = 0
+        self._playing = False
+        self._play_direction = 1
+        self._speed_mult = 1.0
+        # Base timer interval in milliseconds.
+        # A floor of 50 ms prevents a runaway
+        # timer when viz_delay is set to zero.
+        self._base_interval = max(
+            int(self.viz_delay * 1000), 50)
+
+        # --- Transport control bar --------------
+        # Horizontal row of buttons, a scrubber
+        # slider, and status labels. Inserted at
+        # grid row 2 below the policy (row 0)
+        # and trait (row 1) plot rows.
+        control_bar = QtWidgets.QHBoxLayout()
+
+        back_btn = (
+            QtWidgets.QPushButton("<<"))
+        self._play_btn = (
+            QtWidgets.QPushButton("Play"))
+        fwd_btn = (
+            QtWidgets.QPushButton(">>"))
+        rev_btn = (
+            QtWidgets.QPushButton("Rev"))
+
+        self._scrubber = QtWidgets.QSlider(
+            QtCore.Qt.Horizontal)
+        self._scrubber.setMinimum(0)
+        self._scrubber.setMaximum(
+            len(self.frames) - 1)
+        self._scrubber.setValue(0)
+
+        self._speed_label = (
+            QtWidgets.QLabel("1×"))
+        self._frame_label = (
+            QtWidgets.QLabel(""))
+
+        control_bar.addWidget(back_btn)
+        control_bar.addWidget(self._play_btn)
+        control_bar.addWidget(fwd_btn)
+        control_bar.addWidget(rev_btn)
+        control_bar.addWidget(self._scrubber)
+        control_bar.addWidget(
+            self._speed_label)
+        control_bar.addWidget(
+            self._frame_label)
+
+        # Insert the control bar spanning all
+        # columns below the two plot rows.
+        n_cols = max(
+            self.n_policy, self.n_trait)
+        self._grid_layout.addLayout(
+            control_bar, 2, 0, 1, n_cols)
+
+        # --- Auto-play timer --------------------
+        self._timer = QtCore.QTimer()
+        self._timer.setInterval(
+            self._base_interval)
+        self._timer.timeout.connect(
+            self._on_timer_tick)
+
+        # --- Button signal connections ----------
+        back_btn.clicked.connect(
+            self._step_backward)
+        self._play_btn.clicked.connect(
+            self._toggle_play)
+        fwd_btn.clicked.connect(
+            self._step_forward)
+        rev_btn.clicked.connect(
+            self._reverse_play)
+        self._scrubber.valueChanged.connect(
+            self._on_scrubber_change)
+
+        # --- Keyboard shortcuts -----------------
+        self._bind_shortcuts()
+
+        # Render the first recorded frame and
+        # enter the Qt event loop. The window
+        # remains open for interactive replay
+        # until the developer closes it.
+        self._render_frame(0)
+        self.app.exec_()
+
+    # -------------------------------------------
+    # Render recorded frame (PSEUDOCODE §8.9).
+    # -------------------------------------------
+
+    def _render_frame(self, frame_index):
+        """Render a single recorded frame by
+        reading stored (mu, sigma, theta_imag)
+        triples and calling _update_curve() for
+        each curve. Uses the identical rendering
+        path as the live display to ensure visual
+        consistency between live and replayed
+        output.
+
+        Parameters
+        ----------
+        frame_index : int
+            Zero-based index into self.frames.
+        """
+        snapshot = self.frames[frame_index]
+        total = len(self.frames)
+        title = (
+            f"STODEM — {snapshot['label']}"
+            f"  [Frame {frame_index + 1}"
+            f" / {total}]")
+        self.window.setWindowTitle(title)
+        self._frame_label.setText(title)
+
+        # --- Citizens (blue / green) -----------
+        for cit_idx in range(
+                len(self.world.citizens)):
+            items = (
+                self.citizen_curves[cit_idx])
+            for dim in range(self.n_policy):
+                mu, sig, th = snapshot[
+                    ("cit", cit_idx,
+                     "pp", dim)]
+                self._update_curve(
+                    items[('pp', dim)],
+                    mu, sig, th,
+                    CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[
+                    ("cit", cit_idx,
+                     "pa", dim)]
+                self._update_curve(
+                    items[('pa', dim)],
+                    mu, sig, th,
+                    CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[
+                    ("cit", cit_idx,
+                     "ip", dim)]
+                self._update_curve(
+                    items[('ip', dim)],
+                    mu, sig, th,
+                    IDEAL_RGB, 1)
+            for dim in range(self.n_trait):
+                mu, sig, th = snapshot[
+                    ("cit", cit_idx,
+                     "tp", dim)]
+                self._update_curve(
+                    items[('tp', dim)],
+                    mu, sig, th,
+                    CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[
+                    ("cit", cit_idx,
+                     "ta", dim)]
+                self._update_curve(
+                    items[('ta', dim)],
+                    mu, sig, th,
+                    CITIZEN_RGB, 1)
+
+        # --- Politicians (red) -----------------
+        for pol_idx in range(
+                len(self.world.politicians)):
+            items = (
+                self.politician_curves[pol_idx])
+            for dim in range(self.n_policy):
+                mu, sig, th = snapshot[
+                    ("pol", pol_idx,
+                     "pp", dim)]
+                self._update_curve(
+                    items[('pp', dim)],
+                    mu, sig, th,
+                    POLITICIAN_RGB, 1)
+                mu, sig, th = snapshot[
+                    ("pol", pol_idx,
+                     "pa", dim)]
+                self._update_curve(
+                    items[('pa', dim)],
+                    mu, sig, th,
+                    POLITICIAN_RGB, 1)
+            for dim in range(self.n_trait):
+                mu, sig, th = snapshot[
+                    ("pol", pol_idx,
+                     "tr", dim)]
+                self._update_curve(
+                    items[('tr', dim)],
+                    mu, sig, th,
+                    POLITICIAN_RGB, 1)
+
+        # --- Government (black, policy only) ---
+        for dim in range(self.n_policy):
+            mu, sig, th = snapshot[
+                ("gov", 0, "ge", dim)]
+            self._update_curve(
+                self.government_curves[dim],
+                mu, sig, th,
+                GOVERNMENT_RGB, 2)
+
+        self.app.processEvents()
+
+    # -------------------------------------------
+    # Keyboard shortcut setup.
+    # -------------------------------------------
+
+    def _bind_shortcuts(self):
+        """Bind keyboard shortcuts for the replay
+        transport controls to the main window.
+
+        DESIGN §12.6 shortcut table: Space
+        toggles play/pause, Left/Right step one
+        frame, Up/Down adjust speed, R starts
+        reverse playback, Home/End jump to the
+        first and last recorded frames.
+        """
+        def bind(key, slot):
+            """Create a QShortcut on the window
+            that fires the given callback."""
+            QtWidgets.QShortcut(
+                QtGui.QKeySequence(key),
+                self.window
+            ).activated.connect(slot)
+
+        bind(QtCore.Qt.Key_Space,
+             self._toggle_play)
+        bind(QtCore.Qt.Key_Left,
+             self._step_backward)
+        bind(QtCore.Qt.Key_Right,
+             self._step_forward)
+        bind(QtCore.Qt.Key_R,
+             self._reverse_play)
+        bind(QtCore.Qt.Key_Home,
+             self._jump_to_start)
+        bind(QtCore.Qt.Key_End,
+             self._jump_to_end)
+        bind(QtCore.Qt.Key_Up,
+             self._speed_up)
+        bind(QtCore.Qt.Key_Down,
+             self._slow_down)
+
+    # -------------------------------------------
+    # Replay transport callbacks.
+    # -------------------------------------------
+
+    def _on_timer_tick(self):
+        """Advance or reverse one frame per timer
+        tick. Stops playback automatically when
+        the first or last frame is reached."""
+        next_frame = (
+            self._current_frame
+            + self._play_direction)
+        if next_frame >= len(self.frames):
+            self._current_frame = (
+                len(self.frames) - 1)
+            self._stop_playback()
+        elif next_frame < 0:
+            self._current_frame = 0
+            self._stop_playback()
+        else:
+            self._current_frame = next_frame
+        self._render_frame(
+            self._current_frame)
+        self._set_scrubber_silent(
+            self._current_frame)
+
+    def _toggle_play(self):
+        """Toggle between play and pause. Resumes
+        in whichever direction (forward or reverse)
+        was last active."""
+        if self._playing:
+            self._stop_playback()
+        else:
+            self._playing = True
+            self._play_btn.setText("Pause")
+            self._timer.start()
+
+    def _stop_playback(self):
+        """Halt auto-play and reset the play
+        button label."""
+        self._playing = False
+        self._timer.stop()
+        self._play_btn.setText("Play")
+
+    def _step_forward(self):
+        """Stop playback and advance one frame
+        forward."""
+        self._stop_playback()
+        if (self._current_frame
+                < len(self.frames) - 1):
+            self._current_frame += 1
+        self._render_frame(
+            self._current_frame)
+        self._set_scrubber_silent(
+            self._current_frame)
+
+    def _step_backward(self):
+        """Stop playback and step one frame
+        backward."""
+        self._stop_playback()
+        if self._current_frame > 0:
+            self._current_frame -= 1
+        self._render_frame(
+            self._current_frame)
+        self._set_scrubber_silent(
+            self._current_frame)
+
+    def _reverse_play(self):
+        """Start reverse playback. Always sets
+        direction to -1 regardless of the current
+        play state (DESIGN §12.6)."""
+        self._play_direction = -1
+        self._playing = True
+        self._play_btn.setText("Pause")
+        self._timer.start()
+
+    def _speed_up(self):
+        """Double the playback speed by halving
+        the timer interval. Updates the speed
+        label to show the current multiplier."""
+        self._speed_mult *= 2.0
+        self._timer.setInterval(int(
+            self._base_interval
+            / self._speed_mult))
+        self._speed_label.setText(
+            f"{self._speed_mult:.4g}×")
+
+    def _slow_down(self):
+        """Halve the playback speed by doubling
+        the timer interval. Updates the speed
+        label to show the current multiplier."""
+        self._speed_mult /= 2.0
+        self._timer.setInterval(int(
+            self._base_interval
+            / self._speed_mult))
+        self._speed_label.setText(
+            f"{self._speed_mult:.4g}×")
+
+    def _on_scrubber_change(self, value):
+        """Handle user-driven scrubber movement.
+        Stops playback and jumps directly to the
+        selected frame."""
+        self._stop_playback()
+        self._current_frame = value
+        self._render_frame(
+            self._current_frame)
+
+    def _set_scrubber_silent(self, value):
+        """Move the scrubber thumb without firing
+        the valueChanged signal. Blocks signals
+        during the update to prevent a feedback
+        loop that would immediately stop playback
+        by triggering _on_scrubber_change."""
+        self._scrubber.blockSignals(True)
+        self._scrubber.setValue(value)
+        self._scrubber.blockSignals(False)
+
+    def _jump_to_start(self):
+        """Jump to the first recorded frame and
+        stop any active playback."""
+        self._stop_playback()
+        self._current_frame = 0
+        self._render_frame(0)
+        self._set_scrubber_silent(0)
+
+    def _jump_to_end(self):
+        """Jump to the last recorded frame and
+        stop any active playback."""
+        self._stop_playback()
+        self._current_frame = (
+            len(self.frames) - 1)
+        self._render_frame(
+            self._current_frame)
+        self._set_scrubber_silent(
+            self._current_frame)

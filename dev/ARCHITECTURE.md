@@ -104,6 +104,17 @@ group.
 - `diagnostics.py` — Diagnostic utilities for simulation
   debugging and data logging.
 
+**Visualization (Optional)**
+
+- `policy_space_viz.py` (`PolicySpaceViz`) — Live debug
+  visualization of individual agent Gaussians as 2-D
+  projected curves using pyqtgraph. Records per-frame
+  state snapshots during the simulation for post-run
+  replay with interactive transport controls (play,
+  pause, reverse, scrub). Conditionally imported when
+  `-d` / `--debug-viz` is active; the simulation never
+  depends on this module.
+
 ### Dependency Graph
 
 ```
@@ -120,6 +131,8 @@ stodem.py
   |     +-- random_state.py
   +-- output.py
   +-- diagnostics.py
+  +-- policy_space_viz.py (optional, -d flag)
+        +-- pyqtgraph / Qt
 ```
 
 All modules that use randomness import the shared `rng`
@@ -150,6 +163,8 @@ compilation.
 - CMake 3.1.0+ (for installation)
 - Optional: Fortran compiler (gfortran/ifort) for future
   expansion
+- Optional: `pyqtgraph` with Qt binding (`PyQt5`,
+  `PyQt6`, or `PySide6`) for `-d` debug visualization
 - Testing: `pytest`
 
 **Build commands:**

@@ -539,8 +539,9 @@ self-overlap when theta = 0.
 pyqtgraph visualization of individual agent
 Gaussians in policy/trait space. 2-D projected
 curves with colour saturation encoding engagement.
-Interactive display only. See DESIGN §12.6 for
-the full specification.
+Includes live display during the simulation run
+and post-simulation replay with transport controls.
+See DESIGN §12.6 for the full specification.
 
 ### 8.1 Initialization
 
@@ -584,6 +585,7 @@ function PolicySpaceViz(world, settings):
 
     store world, app, window, plots,
           n_policy, n_trait, viz_delay
+    frames = []           # recorded snapshots
 ```
 
 ### 8.2 Curve Pre-Creation
@@ -738,28 +740,270 @@ function update(step_label):
             Pge.mu[dim], Pge.sigma[dim],
             Pge.theta[dim].imag, BLACK, 2)
 
-    # Flush display, throttle via event loop.
+    # Record snapshot (§8.7), then flush display.
+    record_frame(step_label)
     app.processEvents()
     if viz_delay > 0:
         spin on processEvents until deadline
 ```
 
-### 8.7 Finalize
+### 8.7 Frame Recording
 
-No-op — retained for interface consistency with
-the stodem.py call site.
+Record a compact snapshot of the current rendering
+state. Called once per simulation step from
+`update()` before the Qt event loop is flushed.
+Each snapshot stores only the three values per
+curve needed to reproduce the display: mu, sigma,
+and theta_imag.
+
+```
+function record_frame(step_label):
+    snapshot = {label: step_label}
+
+    for each (idx, citizen) in world.citizens:
+        pref  = citizen.stated_policy_pref
+        aver  = citizen.stated_policy_aver
+        ideal = citizen.ideal_policy_pref
+        for dim in 0 .. n_policy - 1:
+            snapshot[("cit", idx, "pp", dim)] =
+                (pref.mu[dim], pref.sigma[dim],
+                 Im(pref.theta[dim]))
+            snapshot[("cit", idx, "pa", dim)] =
+                (aver.mu[dim], aver.sigma[dim],
+                 Im(aver.theta[dim]))
+            snapshot[("cit", idx, "ip", dim)] =
+                (ideal.mu[dim], ideal.sigma[dim],
+                 Im(ideal.theta[dim]))
+
+        tpref = citizen.stated_trait_pref
+        taver = citizen.stated_trait_aver
+        for dim in 0 .. n_trait - 1:
+            snapshot[("cit", idx, "tp", dim)] =
+                (tpref.mu[dim], tpref.sigma[dim],
+                 Im(tpref.theta[dim]))
+            snapshot[("cit", idx, "ta", dim)] =
+                (taver.mu[dim], taver.sigma[dim],
+                 Im(taver.theta[dim]))
+
+    for each (idx, pol) in world.politicians:
+        pref = pol.ext_policy_pref
+        aver = pol.ext_policy_aver
+        for dim in 0 .. n_policy - 1:
+            snapshot[("pol", idx, "pp", dim)] =
+                (pref.mu[dim], pref.sigma[dim],
+                 Im(pref.theta[dim]))
+            snapshot[("pol", idx, "pa", dim)] =
+                (aver.mu[dim], aver.sigma[dim],
+                 Im(aver.theta[dim]))
+
+        trait = pol.ext_trait
+        for dim in 0 .. n_trait - 1:
+            snapshot[("pol", idx, "tr", dim)] =
+                (trait.mu[dim], trait.sigma[dim],
+                 Im(trait.theta[dim]))
+
+    Pge = government.enacted_policy
+    for dim in 0 .. n_policy - 1:
+        snapshot[("gov", 0, "ge", dim)] =
+            (Pge.mu[dim], Pge.sigma[dim],
+             Im(Pge.theta[dim]))
+
+    frames.append(snapshot)
+```
+
+### 8.8 Replay Mode
+
+After the simulation completes, `finalize()` builds
+a transport control bar below the existing plot grid
+and enters a Qt event loop for interactive replay
+of recorded frames. All rendering goes through the
+same `update_curve()` used during the live run
+(§8.5), so live and replayed frames look identical.
 
 ```
 function finalize():
-    pass
+    if frames is empty:
+        return
+
+    current_frame  = 0
+    playing        = False
+    play_direction = +1
+    speed_mult     = 1.0
+    base_interval  = viz_delay * 1000   # ms
+
+    # --- Build control bar (horizontal layout) ---
+    bar = QHBoxLayout
+    back_btn    = QPushButton("<<")
+    play_btn    = QPushButton("Play")
+    fwd_btn     = QPushButton(">>")
+    rev_btn     = QPushButton("Rev")
+    scrubber    = QSlider(0 .. len(frames) - 1)
+    speed_label = QLabel("1.0×")
+    frame_label = QLabel("")
+
+    add [back_btn, play_btn, fwd_btn, rev_btn,
+         scrubber, speed_label, frame_label]
+        to bar
+    insert bar below the plot grid in window
+
+    # --- Auto-play timer ---
+    timer = QTimer(interval = base_interval)
+
+    function on_timer_tick():
+        current_frame += play_direction
+        if current_frame >= len(frames):
+            current_frame = len(frames) - 1
+            stop_playback()
+        elif current_frame < 0:
+            current_frame = 0
+            stop_playback()
+        render_frame(current_frame)
+        scrubber.set_value_silent(current_frame)
+
+    function toggle_play():
+        if playing:
+            stop_playback()
+        else:
+            playing = True
+            # Resume in whichever direction was
+            # last set (forward or reverse).
+            timer.start()
+
+    function stop_playback():
+        playing = False
+        timer.stop()
+
+    function step_forward():
+        stop_playback()
+        if current_frame < len(frames) - 1:
+            current_frame += 1
+        render_frame(current_frame)
+        scrubber.set_value_silent(current_frame)
+
+    function step_backward():
+        stop_playback()
+        if current_frame > 0:
+            current_frame -= 1
+        render_frame(current_frame)
+        scrubber.set_value_silent(current_frame)
+
+    function reverse_play():
+        playing = True
+        play_direction = -1
+        timer.start()
+
+    function speed_up():
+        speed_mult *= 2.0
+        timer.interval =
+            base_interval / speed_mult
+        speed_label.text =
+            str(speed_mult) + "×"
+
+    function slow_down():
+        speed_mult /= 2.0
+        timer.interval =
+            base_interval / speed_mult
+        speed_label.text =
+            str(speed_mult) + "×"
+
+    function on_scrubber_change(value):
+        stop_playback()
+        current_frame = value
+        render_frame(current_frame)
+
+    # --- Keyboard shortcuts ---
+    bind Space → toggle_play
+    bind Left  → step_backward
+    bind Right → step_forward
+    bind R     → reverse_play
+    bind Home  → jump to frame 0, render
+    bind End   → jump to last frame, render
+    bind Up    → speed_up
+    bind Down  → slow_down
+
+    # Show first frame and enter event loop.
+    render_frame(0)
+    app.exec()
 ```
 
-### 8.8 Main Loop Integration
+### 8.9 Render Frame (Replay)
+
+Render a single recorded frame by reading the
+stored (mu, sigma, theta_imag) triples and calling
+`update_curve()` (§8.5) for each curve. The same
+rendering path as the live display ensures visual
+consistency between live and replayed output.
+
+```
+function render_frame(frame_index):
+    snapshot = frames[frame_index]
+    title = "STODEM — " + snapshot.label
+          + " [Frame " + frame_index
+          + " / " + len(frames) + "]"
+    window.title = title
+    frame_label.text = title
+
+    # --- Citizens (blue) and ideal (green) ---
+    for each (idx, _) in world.citizens:
+        items = citizen_curves[idx]
+        for dim in 0 .. n_policy - 1:
+            mu, sig, th =
+                snapshot["cit", idx, "pp", dim]
+            update_curve(items["pp", dim],
+                mu, sig, th, BLUE, 1)
+            mu, sig, th =
+                snapshot["cit", idx, "pa", dim]
+            update_curve(items["pa", dim],
+                mu, sig, th, BLUE, 1)
+            mu, sig, th =
+                snapshot["cit", idx, "ip", dim]
+            update_curve(items["ip", dim],
+                mu, sig, th, GREEN, 1)
+        for dim in 0 .. n_trait - 1:
+            mu, sig, th =
+                snapshot["cit", idx, "tp", dim]
+            update_curve(items["tp", dim],
+                mu, sig, th, BLUE, 1)
+            mu, sig, th =
+                snapshot["cit", idx, "ta", dim]
+            update_curve(items["ta", dim],
+                mu, sig, th, BLUE, 1)
+
+    # --- Politicians (red) ---
+    for each (idx, _) in world.politicians:
+        items = politician_curves[idx]
+        for dim in 0 .. n_policy - 1:
+            mu, sig, th =
+                snapshot["pol", idx, "pp", dim]
+            update_curve(items["pp", dim],
+                mu, sig, th, RED, 1)
+            mu, sig, th =
+                snapshot["pol", idx, "pa", dim]
+            update_curve(items["pa", dim],
+                mu, sig, th, RED, 1)
+        for dim in 0 .. n_trait - 1:
+            mu, sig, th =
+                snapshot["pol", idx, "tr", dim]
+            update_curve(items["tr", dim],
+                mu, sig, th, RED, 1)
+
+    # --- Government (black, policy only) ---
+    for dim in 0 .. n_policy - 1:
+        mu, sig, th =
+            snapshot["gov", 0, "ge", dim]
+        update_curve(government_curves[dim],
+            mu, sig, th, BLACK, 2)
+
+    app.processEvents()
+```
+
+### 8.10 Main Loop Integration
 
 Minimal additions to the main loop (§1) and phase
-functions (§2, §5). The visualization is
-conditionally created and threaded through as an
-optional argument.
+functions (§2, §5). The visualization is conditionally
+created and threaded through as an optional argument.
+After the simulation completes, `finalize()` enters
+interactive replay mode (§8.8).
 
 ```
 # In main():
