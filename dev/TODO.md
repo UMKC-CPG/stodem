@@ -23,6 +23,13 @@ No pending items.
 
 ## DESIGN
 
+- [ ] **Stochastic election mechanism** (DESIGN §10.3, CODE
+  `vote()`). The election is currently deterministic (top
+  vote-getter wins). The core research question (VISION Goal 2)
+  requires a mode where vote tallies define a probability
+  distribution from which the winner is drawn. Add a configurable
+  toggle between deterministic and stochastic election.
+
 - [ ] **#12 — Primary campaign/vote phases**
   (DESIGN §7, deferred). The simulation currently
   runs Campaign → Vote → Govern. The full design
@@ -46,11 +53,19 @@ No pending items.
   a third z-offset, or defer until combined panes
   are actually needed. Currently uses z_pos.
 
-- [ ] **Policy-space view** (DESIGN §12.3, deferred).
-  A second XDMF topology where mu values position
-  glyphs along policy axes in an abstract coordinate
-  space. Deferred until the geographic view is
-  validated.
+- [ ] **Policy-space view — ParaView** (DESIGN §12.3,
+  deferred). A second XDMF topology where mu values
+  position glyphs along policy axes in an abstract
+  coordinate space. Deferred until the geographic
+  view is validated.
+
+- [ ] **Debug viz — policy/trait space** (DESIGN
+  §12.6, CODE `policy_space_viz.py`). Live-updating
+  pyqtgraph visualization showing individual agent
+  Gaussians as 2-D projected curves with colour
+  saturation encoding engagement. Activated by
+  `-d` / `--debug-viz`. Two-row layout (policy
+  top, trait bottom). Needs first live test run.
 
 - [ ] **Citizen-politician alignment glyph**
   (DESIGN §12.3, deferred). A composite glyph

@@ -600,7 +600,8 @@ from diagnostics import Diagnostics
 
 
 def campaign(sim_control, settings, world,
-             hdf5, glyph_hdf5, diag, cycle):
+             hdf5, glyph_hdf5, diag, cycle,
+             viz=None):
     """Execute one full campaign phase.
 
     The campaign phase is where politicians
@@ -733,6 +734,13 @@ def campaign(sim_control, settings, world,
             citizen.apply_influence_shifts()
         print ("applied influence shifts")
 
+        # Debug viz: render current state after
+        #   all shifts have been applied.
+        if viz is not None:
+            viz.update(
+                f"Campaign  Cycle {cycle}"
+                f"  Step {step}")
+
         # - Citizens make a preliminary assessment about who they will vote for.
         for citizen in world.citizens:
             citizen.score_candidates(world)
@@ -855,7 +863,8 @@ def vote(sim_control, world):
 
 
 def govern(sim_control, world, hdf5,
-           glyph_hdf5, diag, cycle):
+           glyph_hdf5, diag, cycle,
+           viz=None):
     """Execute the govern phase: elected politicians
     exert forces on the government's enacted policy.
 
@@ -1022,6 +1031,12 @@ def govern(sim_control, world, hdf5,
         #   just-updated mu and sigma values.
         Pge.update_integration_variables()
 
+        # Debug viz: render after Pge forces.
+        if viz is not None:
+            viz.update(
+                f"Govern  Cycle {cycle}"
+                f"  Step {step}")
+
         # Recompute citizen well-being from the
         #   updated Pge and write to HDF5. This
         #   lets ParaView show how well-being
@@ -1157,18 +1172,34 @@ def main():
         settings, world, sample_idx)
     print ("Diagnostics Initialized")
 
+    # Conditionally create the debug policy/
+    #   trait-space visualization (DESIGN §12.6).
+    #   The import is deferred so that pyqtgraph
+    #   is never loaded unless the flag is set.
+    viz = None
+    if settings.debug_viz:
+        from policy_space_viz import (
+            PolicySpaceViz)
+        viz = PolicySpaceViz(world, settings)
+        print("Debug Viz Initialized")
+
     # Start executing the main activities of
     #   the program.
     for cycle in range(sim_control.num_cycles):
         print ("cycle = ", cycle)
         campaign(sim_control, settings,
                  world, hdf5, glyph_hdf5,
-                 diag, cycle)
+                 diag, cycle, viz)
 
         vote(sim_control, world)
 
         govern(sim_control, world, hdf5,
-               glyph_hdf5, diag, cycle)
+               glyph_hdf5, diag, cycle, viz)
+
+    # Finalize the debug visualization (no-op
+    #   for the interactive pyqtgraph display).
+    if viz is not None:
+        viz.finalize()
 
     # Finalize: write XDMF using the actual
     #   number of steps completed, then close

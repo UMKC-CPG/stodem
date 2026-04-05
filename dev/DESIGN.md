@@ -1882,6 +1882,265 @@ generated script:
 | `NUM_ROWS` | 2 | Grid layout rows |
 | `NUM_COLS` | 3 | Grid layout columns |
 
+### 12.6 Debug Visualization — Policy/Trait Space
+
+A pyqtgraph visualization that renders every
+agent's Gaussians as 2-D projected curves on
+per-dimension axes. The vertical amplitude is the
+bell shape multiplied by cos(theta) and colour
+saturation encodes |cos(theta)|, giving a fast
+interactive display for debugging agent interactions
+without copying files or launching external programs.
+
+#### Purpose and scope
+
+The existing output system (§12.1–12.5) writes
+aggregate patch/zone data to HDF5/XDMF for post-hoc
+ParaView visualization. This debug visualization
+operates in a different regime: it reads live
+simulation objects (individual citizens, politicians,
+and the government) during the run. It is a debugging
+aid, not a publication tool.
+
+#### Module design
+
+A new module `src/scripts/policy_space_viz.py`
+provides a single class, `PolicySpaceViz`. The module
+depends on the simulation's data objects (World,
+Citizen, Politician, Government, Gaussian) but
+the simulation never depends on the visualization.
+The coupling is a single optional call site in
+`stodem.py` — if the visualization is disabled,
+the module is never imported.
+
+```
+stodem.py
+    │  if debug_viz_enabled:
+    │      from policy_space_viz import (
+    │          PolicySpaceViz)
+    │      viz = PolicySpaceViz(world, settings)
+    │      ...
+    │      viz.update(step_label)
+    │      ...
+    │      viz.finalize()
+    │
+    ▼
+policy_space_viz.py  (read-only access to world)
+    │
+    ▼
+pyqtgraph PlotWidget window (interactive)
+```
+
+Future visualization modules can follow the same
+pattern: a class with `__init__(world, settings)`,
+`update(step_label)`, and `finalize()`,
+conditionally imported behind a flag.
+
+#### Command-line activation
+
+A new flag `-d` / `--debug-viz` is added to the
+argument parser in `settings.py`. It is a boolean
+flag (store_true), defaulting to False. No XML
+configuration is needed — this is a developer tool,
+not a simulation parameter.
+
+An optional `--viz-delay` argument (float, seconds,
+default 0.1) controls the minimum pause between
+frames. When the simulation runs faster than the
+delay, the visualization throttles it so the
+developer can watch state evolve. Larger values
+slow the animation; smaller values let it run
+closer to simulation speed.
+
+| Flag | Effect |
+|---|---|
+| `-d` alone | Interactive live display |
+| `--viz-delay 0.5` | 0.5 s between frames |
+
+#### 2-D projected Gaussian encoding
+
+Each Gaussian is rendered as a 2-D curve in
+(x, y) space. The 1-D policy or trait axis maps
+to the x-axis. The bell curve amplitude is
+multiplied by cos(theta) to project the 3-D
+rotated Gaussian onto the real (engaged) plane:
+
+```
+x = linspace(mu - 4*sigma, mu + 4*sigma, N_pts)
+amplitude = exp(-(x - mu)^2 / (2 * sigma^2))
+y = amplitude * cos(theta)
+```
+
+**Colour saturation encoding**: The absolute value
+|cos(theta)| is mapped to colour saturation. At
+full engagement (|cos(theta)| = 1) the agent's
+base colour appears at maximum saturation. As
+engagement drops the colour fades toward white.
+A minimum engagement floor (~15 %) ensures that
+even fully apathetic agents (cos(theta) = 0)
+leave a faint visible trace rather than vanishing
+into the white background.
+
+**Unit-peak normalization**: The standard Gaussian
+prefactor `1/(sigma * sqrt(2*pi))` is omitted.
+Since sigma is already visible as curve width, the
+peak height would carry no independent information.
+Normalizing to unit peak (amplitude = 1 at x = mu)
+makes all curves visually comparable regardless of
+sigma scale.
+
+This encoding shows all three Gaussian parameters
+through a combination of geometry and colour:
+
+| Parameter | Visual mapping                  |
+|-----------|---------------------------------|
+| mu        | Horizontal position of peak     |
+| sigma     | Width of the bell curve         |
+| theta     | Projected height + saturation   |
+
+The sign convention (§4.1) produces correct visual
+geometry without special-casing: preference
+Gaussians (cos(theta) > 0) curve upward (+y),
+aversion Gaussians (cos(theta) < 0) curve downward
+(-y). As theta approaches pi/2 (apathy), the curve
+flattens toward the axis AND its colour fades —
+a double encoding that makes engagement level
+immediately obvious at a glance.
+
+#### Axis limits
+
+The x-axis (policy or trait value) limits are
+taken from `world.policy_limits` and
+`world.trait_limits`, which are computed by
+`sim_control.compute_data_range()` before the
+simulation loop begins (§8 of ARCHITECTURE.md).
+These limits include a 20% buffer to accommodate
+drift during the simulation. Using fixed limits
+prevents the view from jumping between frames as
+agents move.
+
+The y-axis (projected amplitude) limits are fixed
+at [-1.1, 1.1]. With unit-peak normalization,
+fully engaged curves peak at +/-1.0; the 10%
+buffer prevents curve tips from touching the axis
+boundary. Preference curves occupy [0, 1] in y;
+aversion curves occupy [-1, 0] in y. A thin grey
+zero-line separates the two regions.
+
+#### Subplot layout
+
+The window uses a two-row QGridLayout of pyqtgraph
+PlotWidgets:
+
+- **Top row**: Policy dimensions (one PlotWidget
+  per policy dimension, left to right).
+- **Bottom row**: Trait dimensions (one PlotWidget
+  per trait dimension, left to right).
+
+The number of columns is `max(num_policy_dims,
+num_trait_dims)`. If the counts differ, the
+shorter row leaves unused grid cells empty.
+
+Each subplot carries a descriptive title label
+(e.g., "Policy Dim 0") and axis labels: x-axis
+shows the policy or trait value, y-axis shows
+"Projected amplitude". The window title shows the
+current step label (e.g., "Campaign  Cycle 0
+Step 3" or "Govern  Cycle 1  Step 2").
+
+#### Colour and style
+
+| Agent type     | Base colour | Width |
+|----------------|-------------|-------|
+| Citizen        | Blue        | 1 px  |
+| Citizen ideal  | Green       | 1 px  |
+| Politician     | Red         | 1 px  |
+| Government     | Black       | 2 px  |
+
+All agents of the same type share one base colour.
+The actual displayed colour varies per-curve: it
+is the base colour lerped toward white by the
+factor `(1 - engagement)` where engagement =
+`MIN_ENGAGEMENT + (1 - MIN_ENGAGEMENT) *
+|cos(theta)|`. A vivid curve means the agent is
+engaged on that dimension; a pale, nearly white
+curve means the agent is apathetic.
+
+Individual agent identity is maintained across
+frames by consistent ordering — agent i always
+uses the same pre-created PlotDataItem, so its
+curve can be tracked visually as it shifts.
+
+Citizens show: stated_policy_pref, stated_policy_
+aver (policy column); stated_trait_pref,
+stated_trait_aver (trait column). Ideal policy
+(Pci) is shown in green in the policy column —
+this is the hidden ground truth the citizen does
+not know, visible only to the developer.
+
+Politicians show: ext_policy_pref, ext_policy_aver
+(policy column); ext_trait (trait column). External
+(apparent) positions are shown because those are
+what citizens respond to during campaigns.
+
+Government shows: enacted_policy (Pge) in the
+policy row only. Government has no traits.
+
+Within each subplot, preference and aversion
+Gaussians for all agents are drawn together. The
+sign convention naturally separates them visually:
+preference curves go up (+y), aversion curves go
+down (-y).
+
+#### Integration with the simulation loop
+
+The `viz.update(step_label)` call is placed at two
+points in `stodem.py`:
+
+1. **Campaign loop**: After influence shifts are
+   applied and before the HDF5 write. At this
+   point, all citizen Gaussians reflect the
+   current step's state.
+
+2. **Govern loop**: After forces are applied to
+   Pge. At this point, the government's enacted
+   policy reflects the current govern step.
+
+A third call, `viz.finalize()`, is placed after
+the simulation loop completes, alongside the
+existing XDMF and HDF5 finalization. It is a
+no-op for the interactive display.
+
+#### Performance considerations
+
+pyqtgraph uses pre-created PlotDataItem objects
+that are updated in-place via `setData()` and
+`setPen()` each frame. No widgets are created or
+destroyed per frame; no axes are cleared and
+redrawn. This is dramatically faster than the
+previous matplotlib approach which required
+clearing all 3-D axes and redrawing every curve
+from scratch.
+
+For debugging-scale populations (quickTest: a few
+patches, tens of citizens, a handful of
+politicians), the rendering cost is negligible.
+Each Gaussian is a single `setData()` call with
+~80 points. Even 100 agents × 5 Gaussians ×
+80 points = 40k points updates in milliseconds.
+
+For larger populations, the developer can either
+skip the debug viz flag or, as a future extension,
+add a sampling option that updates only a random
+subset of citizens.
+
+#### Dependencies
+
+The visualization requires `pyqtgraph` and a Qt
+binding (`PyQt5`, `PyQt6`, or `PySide6`). These
+are not needed for normal simulation runs — the
+module is only imported when `-d` is active.
+
 ---
 
 ## 13. Randomness and Reproducibility

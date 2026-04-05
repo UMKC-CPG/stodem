@@ -531,3 +531,259 @@ function integral(G1, G2):
 where `self_norm = 1 / sqrt(pi / (2 * alpha))` is the
 normalization factor that makes each Gaussian have unit
 self-overlap when theta = 0.
+
+---
+
+## 8. Debug Visualization — Policy/Trait Space
+
+pyqtgraph visualization of individual agent
+Gaussians in policy/trait space. 2-D projected
+curves with colour saturation encoding engagement.
+Interactive display only. See DESIGN §12.6 for
+the full specification.
+
+### 8.1 Initialization
+
+```
+function PolicySpaceViz(world, settings):
+    n_policy = world.num_policy_dims
+    n_trait  = world.num_trait_dims
+    n_cols   = max(n_policy, n_trait)
+
+    # Create Qt application and window.
+    app    = pyqtgraph.mkQApp()
+    window = QWidget with QGridLayout
+
+    # Build 2-row grid of PlotWidgets.
+    #   Row 0 = policy dims, row 1 = trait dims.
+    plots = 2-D array [2, n_cols], all None
+
+    for col in 0 .. n_policy - 1:
+        pw = PlotWidget(title="Policy Dim " + col)
+        pw.x_range = [world.policy_limits[0][col],
+                       world.policy_limits[1][col]]
+        pw.y_range = [-1.1, 1.1]
+        pw.add_zero_line(y=0, grey)
+        plots[0, col] = pw
+        add pw to grid at (row=0, col)
+
+    for col in 0 .. n_trait - 1:
+        pw = PlotWidget(title="Trait Dim " + col)
+        pw.x_range = [world.trait_limits[0][col],
+                       world.trait_limits[1][col]]
+        pw.y_range = [-1.1, 1.1]
+        pw.add_zero_line(y=0, grey)
+        plots[1, col] = pw
+        add pw to grid at (row=1, col)
+
+    # Pre-create curve items (§8.2).
+    create_all_curves()
+
+    window.show()
+    app.processEvents()
+
+    store world, app, window, plots,
+          n_policy, n_trait, viz_delay
+```
+
+### 8.2 Curve Pre-Creation
+
+Pre-create one PlotDataItem per agent Gaussian
+per dimension. These objects persist for the life
+of the visualization — only their data and pen
+colour change each frame.
+
+```
+function create_all_curves():
+    citizen_curves = []
+    for each citizen in world.citizens:
+        items = {}
+        for dim in 0 .. n_policy - 1:
+            pw = plots[0, dim]
+            items[("pp", dim)] = pw.plot(BLUE)
+            items[("pa", dim)] = pw.plot(BLUE)
+            items[("ip", dim)] = pw.plot(GREEN)
+        for dim in 0 .. n_trait - 1:
+            pw = plots[1, dim]
+            items[("tp", dim)] = pw.plot(BLUE)
+            items[("ta", dim)] = pw.plot(BLUE)
+        citizen_curves.append(items)
+
+    politician_curves = []
+    for each politician in world.politicians:
+        items = {}
+        for dim in 0 .. n_policy - 1:
+            pw = plots[0, dim]
+            items[("pp", dim)] = pw.plot(RED)
+            items[("pa", dim)] = pw.plot(RED)
+        for dim in 0 .. n_trait - 1:
+            pw = plots[1, dim]
+            items[("tr", dim)] = pw.plot(RED)
+        politician_curves.append(items)
+
+    government_curves = {}
+    for dim in 0 .. n_policy - 1:
+        pw = plots[0, dim]
+        government_curves[dim] = pw.plot(BLACK)
+```
+
+### 8.3 Gaussian Curve Computation
+
+Compute the 2-D projected curve for a single
+Gaussian on one dimension. The bell curve amplitude
+is multiplied by cos(theta) to project onto the
+real (engaged) plane.
+
+Unit-peak normalization: the `1/(sigma*sqrt(2*pi))`
+prefactor is omitted because peak height is
+determined solely by sigma, which is already
+visible as curve width.
+
+```
+function projected_curve(mu, sigma, cos_theta,
+                         n_points = 80):
+    x = linspace(mu - 4 * sigma,
+                 mu + 4 * sigma, n_points)
+
+    amplitude = exp(-(x - mu)^2
+                    / (2 * sigma^2))
+
+    y = amplitude * cos_theta
+
+    return x, y
+```
+
+Sign convention (DESIGN §4.1) produces correct
+visual geometry:
+- Preference (theta in [0, pi/2)):
+    cos > 0, curve above axis (+y).
+- Aversion (theta in (pi/2, pi]):
+    cos < 0, curve below axis (-y).
+- Apathy (theta near pi/2):
+    cos near 0, curve flattens.
+
+### 8.4 Engagement Colour
+
+Compute colour with saturation reflecting the
+engagement level |cos(theta)|. Base colour is
+lerped toward white as engagement drops. A
+minimum floor prevents fully apathetic agents
+from becoming invisible.
+
+```
+function engagement_color(base_rgb, cos_theta):
+    raw = abs(cos_theta)
+    engagement = MIN_ENGAGEMENT
+                 + (1 - MIN_ENGAGEMENT) * raw
+    fade = 1 - engagement
+    r = base_rgb.r + (255 - base_rgb.r) * fade
+    g = base_rgb.g + (255 - base_rgb.g) * fade
+    b = base_rgb.b + (255 - base_rgb.b) * fade
+    return (int(r), int(g), int(b))
+```
+
+### 8.5 Per-Curve Update
+
+Update one pre-created curve item with new
+projected data and engagement-coloured pen.
+
+```
+function update_curve(curve_item, mu, sigma,
+                      theta_imag, base_rgb, w):
+    cos_theta = cos(theta_imag)
+    x, y = projected_curve(mu, sigma, cos_theta)
+    color = engagement_color(base_rgb, cos_theta)
+    curve_item.setData(x, y, pen=(color, w))
+```
+
+### 8.6 Update (per simulation step)
+
+Called once per simulation step. Refreshes every
+pre-created curve item with the current agent
+state and flushes the Qt event loop.
+
+```
+function update(step_label):
+    window.title = "STODEM — " + step_label
+
+    # --- Citizens (blue) and ideal (green) ---
+    for each (cit_idx, citizen) in citizens:
+        items = citizen_curves[cit_idx]
+        for dim in 0 .. n_policy - 1:
+            update_curve(items["pp", dim],
+                pref.mu[dim], pref.sigma[dim],
+                pref.theta[dim].imag, BLUE, 1)
+            update_curve(items["pa", dim],
+                aver.mu[dim], aver.sigma[dim],
+                aver.theta[dim].imag, BLUE, 1)
+            update_curve(items["ip", dim],
+                ideal.mu[dim], ideal.sigma[dim],
+                ideal.theta[dim].imag, GREEN, 1)
+        for dim in 0 .. n_trait - 1:
+            update_curve(items["tp", dim], ...)
+            update_curve(items["ta", dim], ...)
+
+    # --- Politicians (red) ---
+    for each (pol_idx, pol) in politicians:
+        items = politician_curves[pol_idx]
+        for dim in 0 .. n_policy - 1:
+            update_curve(items["pp", dim], ...)
+            update_curve(items["pa", dim], ...)
+        for dim in 0 .. n_trait - 1:
+            update_curve(items["tr", dim], ...)
+
+    # --- Government (black, policy only) ---
+    for dim in 0 .. n_policy - 1:
+        update_curve(government_curves[dim],
+            Pge.mu[dim], Pge.sigma[dim],
+            Pge.theta[dim].imag, BLACK, 2)
+
+    # Flush display, throttle via event loop.
+    app.processEvents()
+    if viz_delay > 0:
+        spin on processEvents until deadline
+```
+
+### 8.7 Finalize
+
+No-op — retained for interface consistency with
+the stodem.py call site.
+
+```
+function finalize():
+    pass
+```
+
+### 8.8 Main Loop Integration
+
+Minimal additions to the main loop (§1) and phase
+functions (§2, §5). The visualization is
+conditionally created and threaded through as an
+optional argument.
+
+```
+# In main():
+if settings.debug_viz:
+    viz = PolicySpaceViz(world, settings)
+else:
+    viz = None
+
+for cycle in 0 .. num_cycles - 1:
+    campaign(sim, settings, world, hdf5,
+             glyph, cycle, viz)
+    vote(sim, world)
+    govern(sim, world, hdf5, glyph, cycle, viz)
+
+if viz is not None:
+    viz.finalize()
+
+# In campaign(), after apply_influence_shifts():
+if viz is not None:
+    viz.update("Campaign  Cycle " + cycle
+               + "  Step " + step)
+
+# In govern(), after Pge force application:
+if viz is not None:
+    viz.update("Govern  Cycle " + cycle
+               + "  Step " + step)
+```

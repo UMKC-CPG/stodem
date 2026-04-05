@@ -46,9 +46,36 @@ is left inconsistent.
 
 ## Coding Style
 
-Lines must be <= 80 characters. Each line should be filled as long as
-possible without exceeding 80. Writing a 40-char line when 75 characters
-were available is just as wrong as exceeding 80. Fill lines to the limit.
+### Line Length
+
+Lines MUST NOT exceed 80 characters. This is a hard limit. At the same
+time, every line MUST be filled to at least 70 characters whenever the
+content allows it. A 45-character line when 75 characters were available
+is a formatting error just as serious as exceeding 80. Target the
+70–80 character band on every line; treat both the floor and the
+ceiling as mandatory.
+
+### Documentation and Naming
+
+CRITICAL: All program code must include rich, expressive documentation
+so that students reading the source can easily follow what is happening.
+Every function, class, and non-trivial block should carry clear
+explanatory comments or docstrings that describe purpose, inputs,
+outputs, and any relevant physics or math.
+
+Variable names must be readable and self-documenting. Avoid cryptic
+one- or two-letter abbreviations. Prefer concise but meaningful names
+that a reader can understand without cross-referencing a legend.
+Slightly-too-long names are far better than opaque short ones.
+
+Good naming examples:
+- `elec_mom` instead of `em` or `electron_momentum`
+- `nuc_pot` instead of `np` or `nuclear_potential`
+- `grid_spacing` instead of `gs` or `the_spacing_between_grid_points`
+
+The goal is a middle ground: short enough to keep expressions tidy,
+long enough that any student can read the code cold and follow the
+logic without guessing what a variable holds.
 
 ## Project Overview
 
@@ -82,6 +109,7 @@ make && make install  # Installs to $STODEM_DIR/bin
 
 - Python 3 with: `lxml`, `numpy`, `h5py`
 - CMake 3.1.0+ (for installation)
+- Optional: `pyqtgraph`, `PyQt5` (for `-d` debug viz only)
 - Optional: Fortran compiler (gfortran/ifort) for future expansion
 
 ## Architecture

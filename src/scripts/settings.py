@@ -86,15 +86,46 @@ Defaults are given in $STODEM_RC/stodemrc.py.
                             f'Default: {self.infile}')
 
         # Define the output file prefix.
-        parser.add_argument('-o', '--outfile', dest='outfile', type=ascii,
-                            default=self.outfile, help='Output file name ' +
-                            f'prefix for hdf5 and xdmf. ' +
-                            f'Default: {self.outfile}')
+        parser.add_argument(
+            '-o', '--outfile',
+            dest='outfile', type=ascii,
+            default=self.outfile,
+            help='Output file name prefix for '
+                 'hdf5 and xdmf. '
+                 f'Default: {self.outfile}')
+
+        # Enable the debug policy/trait-space
+        #   visualization (DESIGN §12.6). Opens a
+        #   live pyqtgraph window showing 2-D
+        #   projected Gaussian curves with colour
+        #   saturation encoding engagement.
+        parser.add_argument(
+            '-d', '--debug-viz',
+            dest='debug_viz',
+            action='store_true',
+            default=False,
+            help='Enable debug visualization of '
+                 'policy/trait space.')
+
+        # Minimum pause between frames (seconds).
+        #   Throttles the live display so the
+        #   developer can watch state evolve.
+        #   Larger values slow the animation;
+        #   smaller values let it run closer to
+        #   simulation speed.
+        parser.add_argument(
+            '--viz-delay',
+            dest='viz_delay', type=float,
+            default=0.1,
+            help='Seconds between viz frames. '
+                 'Default: 0.1')
 
 
     def reconcile(self, args):
         self.infile = args.infile.strip("'")
         self.outfile = args.outfile.strip("'")
+        self.debug_viz = args.debug_viz
+        self.viz_delay = args.viz_delay
 
 
     def recordCLP(self):
