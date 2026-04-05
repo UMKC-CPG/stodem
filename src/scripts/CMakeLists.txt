@@ -10,6 +10,7 @@ gaussian.py
 government.py
 output.py
 patch.py
+policy_space_viz.py
 politician.py
 random_state.py
 settings.py
