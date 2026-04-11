@@ -213,63 +213,32 @@ class Xdmf():
         for i in range(num_steps):
 
             # Add the time step grid.
-            timestep_grid.append(
-                    etree.SubElement(
-                        time_collection_grid,
-                        "Grid",
-                        Name=f"Step{i}",
-                        GridType="Uniform"))
+            timestep_grid.append(etree.SubElement(time_collection_grid,
+                "Grid", Name=f"Step{i}", GridType="Uniform"))
 
-            # Make the time step value an integer.
-            #   (Arbitrary time duration.)
-            timestep.append(
-                    etree.SubElement(
-                        timestep_grid[i], "Time",
-                        Value=f"{i}.0"))
+            # Make the time step value an integer (arbitrary time duration).
+            timestep.append(etree.SubElement(
+                timestep_grid[i], "Time", Value=f"{i}.0"))
 
-            # Define the topology for this grid.
-            #   (Ideally, we would define a single
-            #   topology just below the "Domain" and
-            #   then reference it here. But for some
-            #   reason it didn't work and so we will
-            #   just repeat the topology here for
-            #   every time step grid even though it
-            #   "wastes" space.)
-            topology.append(
-                    etree.SubElement(
-                        timestep_grid[i],
-                        "Topology",
-                        Name="Topo",
-                        TopologyType="2DCoRectMesh",
-                        Dimensions=(
-                            f"{world.x_num_patches}"
-                            f" {world.y_num_patches}"
-                        )))
+            # Define the topology for this grid. (Ideally, we would define
+            #   a single topology below the "Domain" and then reference it
+            #   here. But for some reason it didn't work and so we repeat
+            #   it for every time step grid even though it "wastes" space.)
+            topology.append(etree.SubElement(timestep_grid[i], "Topology",
+                Name="Topo", TopologyType="2DCoRectMesh",
+                Dimensions=(f"{world.x_num_patches}"
+                            f" {world.y_num_patches}")))
 
-            # Same for the geometry as for the
-            #   topology.
-            geometry.append(
-                    etree.SubElement(
-                        timestep_grid[i],
-                        "Geometry",
-                        Name="Geom",
-                        GeometryType="ORIGIN_DXDY"))
+            # Same for the geometry as for the topology.
+            geometry.append(etree.SubElement(timestep_grid[i], "Geometry",
+                Name="Geom", GeometryType="ORIGIN_DXDY"))
 
-            # The geometry needs two data elements,
-            #   the origin and the spatial deltas.
-            geometry_origin.append(
-                    etree.SubElement(
-                        geometry[i], "DataItem",
-                        NumberType="Float",
-                        Dimensions="2",
-                        Format="XML"))
+            # The geometry needs two data elements: origin and spatial deltas.
+            geometry_origin.append(etree.SubElement(geometry[i], "DataItem",
+                NumberType="Float", Dimensions="2", Format="XML"))
             geometry_origin[i].text = "0.0 0.0"
-            geometry_dxdy.append(
-                    etree.SubElement(
-                        geometry[i], "DataItem",
-                        NumberType="Float",
-                        Dimensions="2",
-                        Format="XML"))
+            geometry_dxdy.append(etree.SubElement(geometry[i], "DataItem",
+                NumberType="Float", Dimensions="2", Format="XML"))
             geometry_dxdy[i].text = "1.0 1.0"
 
             # XDMF attributes frame the data items
@@ -294,14 +263,9 @@ class Xdmf():
             #   along with its data item that points
             #   to the actual data in the HDF5 file.
             for p in world.properties:
-                attribute[i].append(
-                        etree.SubElement(
-                            timestep_grid[i],
-                            "Attribute",
-                            Name=f"{p.name}",
-                            Center="Node",
-                            AttributeType=(
-                                f"{p.datatype}")))
+                attribute[i].append(etree.SubElement(timestep_grid[i],
+                    "Attribute", Name=f"{p.name}", Center="Node",
+                    AttributeType=f"{p.datatype}"))
                 data_item[i].append(etree.SubElement(attribute[i][-1],
                         "DataItem", NumberType="Float", Dimensions=(
                         f"{world.x_num_patches} {world.y_num_patches}"),
@@ -568,9 +532,7 @@ class GlyphHdf5():
         # World centroid = mean of all patch centers
         # on a regular grid: ((nx-1)/2, (ny-1)/2).
         gov_xyz = np.array(
-            [[(nx - 1) / 2.0,
-              (ny - 1) / 2.0,
-              0.0]],
+            [[(nx - 1) / 2.0, (ny - 1) / 2.0, 0.0]],
             dtype=np.float32)
         geo_gov = self.h_fid[
             'GlyphGeometry/government']

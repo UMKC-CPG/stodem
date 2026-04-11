@@ -107,13 +107,14 @@ group.
 **Visualization (Optional)**
 
 - `policy_space_viz.py` (`PolicySpaceViz`) — Live debug
-  visualization of individual agent Gaussians as 2-D
-  projected curves using pyqtgraph. Records per-frame
-  state snapshots during the simulation for post-run
-  replay with interactive transport controls (play,
-  pause, reverse, scrub). Conditionally imported when
-  `-d` / `--debug-viz` is active; the simulation never
-  depends on this module.
+  visualization of individual agent Gaussians using
+  pyqtgraph. Each dimension has two subplots: a real
+  projection (cos θ, the engaged component) and an
+  imaginary projection (sin θ, the latent/apathetic
+  component). Records per-frame state snapshots for
+  post-run replay with interactive transport controls.
+  Conditionally imported when `-d` / `--debug-viz` is
+  active; the simulation never depends on this module.
 
 ### Dependency Graph
 

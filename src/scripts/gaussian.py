@@ -135,12 +135,12 @@ class Gaussian():
         preferences, negative for aversions.
 
     self_norm : ndarray
-        (pi * sigma^2)^0.75 * |cos_theta|.
-        The square root of the Gaussian's self-
-        overlap I(G,G). Used to normalize the
-        overlap integral to [-1, +1]. Cached so
-        that integral() only pays one multiply
-        and one divide per call.
+        (pi * sigma^2)^0.25 * |cos_theta|.
+        The square root of the unnormalized 1-D
+        Gaussian's self-overlap I(G,G). Used to
+        normalize the overlap integral to [-1, +1].
+        Cached so that integral() only pays one
+        multiply and one divide per call.
     """
 
     def __init__(self, pos, stddev, orien,
@@ -187,13 +187,37 @@ class Gaussian():
         Computed quantities:
           alpha     = 1 / (2 * sigma^2)
           cos_theta = cos(Im(theta))
-          self_norm = (pi * sigma^2)^0.75
+          self_norm = (pi * sigma^2)^0.25
                       * |cos_theta|
+
+        The self_norm is the square root of the
+        self-overlap of a unit-area 1-D Gaussian
+        (times the theta engagement factor). For a
+        normalized 1-D Gaussian g(x) = [1/(s*sqrt(
+        2*pi))] * exp(-(x-mu)^2/(2*s^2)):
+
+          I(G,G) = integral of g^2
+                 = 1 / (2*s*sqrt(pi))
+                 = 1 / (4*pi*s^2)^(1/2)
+
+        so sqrt(I(G,G)) = (4*pi*s^2)^(-1/4)
+                        = 1 / (pi*s^2)^0.25 / sqrt(2)
+
+        However, because both the raw integral and
+        self_norm use the UNNORMALIZED Gaussian
+        exp(-(x-mu)^2/(2*s^2)) (area = s*sqrt(2*pi)
+        rather than 1), the normalization prefactors
+        cancel in the ratio I_raw/(norm1*norm2).
+        The self-overlap of the unnormalized 1-D
+        Gaussian is s*sqrt(pi), so:
+
+          sqrt(I_unnorm(G,G)) = (s*sqrt(pi))^0.5
+                              = (pi*s^2)^0.25
         """
         self.alpha = 0.5 / self.sigma**2
         self.cos_theta = np.cos(self.theta.imag)
         self.self_norm = (
-            (np.pi * self.sigma**2)**0.75
+            (np.pi * self.sigma**2)**0.25
             * np.abs(self.cos_theta))
 
 
@@ -202,27 +226,40 @@ class Gaussian():
         between this Gaussian and another.
 
         The raw overlap integral between two 1-D
-        complex Gaussians G1, G2 is:
+        (unnormalized) complex Gaussians G1, G2 is:
 
-          I_raw = (pi / zeta)^1.5
+          I_raw = (pi / zeta)^0.5
                   * exp(-xi * d^2)
                   * cos(theta_1) * cos(theta_2)
 
         where:
           zeta = alpha_1 + alpha_2
-          xi   = 1 / (2 * zeta)
+          xi   = alpha_1 * alpha_2 / zeta
           d    = mu_1 - mu_2
+
+        Derivation: for two Gaussians
+        exp(-a1*(x-m1)^2) and exp(-a2*(x-m2)^2),
+        completing the square in the product
+        integral yields sqrt(pi/zeta) for the
+        Gaussian integral factor and exp(-xi*d^2)
+        for the separation penalty, where
+        xi = a1*a2/zeta is the reduced exponent
+        (analogous to reduced mass in classical
+        mechanics).
 
         To make the result independent of sigma
         and bounded to [-1, +1], we normalize by
         the geometric mean of the two self-overlaps:
 
-          I_norm = I_raw / (self_norm_1 * self_norm_2)
+          I_norm = I_raw
+                   / (self_norm_1 * self_norm_2)
 
         Physical interpretation:
-          +1 = identical Gaussians (perfect alignment)
+          +1 = identical Gaussians (perfect
+               alignment)
           -1 = identical except opposite engagement
-               signs (pref vs aver; max disagreement)
+               signs (pref vs aver; max
+               disagreement)
            0 = no overlap (distant positions or at
                least one is fully apathetic)
 
@@ -240,15 +277,16 @@ class Gaussian():
             where either Gaussian has cos_theta = 0
             (fully apathetic / zero self_norm).
         """
-        one_over_zeta = 1.0 / (self.alpha + g.alpha)
-        xi = 0.5 * one_over_zeta
+        zeta = self.alpha + g.alpha
+        xi = self.alpha * g.alpha / zeta
         dist = self.mu - g.mu
-        exp = np.exp(-xi * dist**2)
+        exp_factor = np.exp(-xi * dist**2)
         raw = (
-            (np.pi * one_over_zeta)**1.5 * exp
+            (np.pi / zeta)**0.5 * exp_factor
             * self.cos_theta * g.cos_theta)
         norm = self.self_norm * g.self_norm
-        return np.where(norm > 0.0, raw / norm, 0.0)
+        return np.where(
+            norm > 0.0, raw / norm, 0.0)
 
 
     def accumulate(self, gaussian):

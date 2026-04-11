@@ -170,13 +170,17 @@
 #   FWHM = 2 sqrt(2 ln(2)) * sigma.
 #   alpha = 1/(2 sigma^2)
 #   zeta = alpha_1 + alpha_2 for two Gaussians
-#   xi = 1/(2 zeta)
+#   xi = alpha_1 * alpha_2 / zeta  (reduced exponent)
 #   d = mu_1 - mu_2 for two Gaussians
 
-# The key relationship between any two Gaussians G1, G2 is their overlap
-#   integral:
-#   I(G1,G2) = Integral(Re(G1)*Re(G2) dx; -infinity..+infinity)
-#   I(G1,G2) = (pi/zeta)^1.5 * exp(-xi * d^2) * cos(theta_1) * cos(theta_2)
+# The key relationship between any two Gaussians
+#   G1, G2 is their overlap integral:
+#   I(G1,G2) = Integral(G1 * G2 dx;
+#                        -infinity..+infinity)
+#   I_raw    = (pi/zeta)^0.5 * exp(-xi * d^2)
+#              * cos(theta_1) * cos(theta_2)
+#   I_norm   = I_raw / (self_norm_1 * self_norm_2)
+#   self_norm = (pi * sigma^2)^0.25 * |cos(theta)|
 #   The numerical value of this integral is between -1 and +1. The
 #   maximum value occurs when both Gaussians have exactly equal
 #   parameters. The minimum value occurs when both Gaussians have exactly
@@ -738,7 +742,7 @@ def campaign(sim_control, settings, world,
         #   all shifts have been applied.
         if viz is not None:
             viz.update(
-                f"Campaign  Cycle {cycle}"
+                f"(C) Cycle {cycle}"
                 f"  Step {step}")
 
         # - Citizens make a preliminary assessment about who they will vote for.
@@ -753,17 +757,13 @@ def campaign(sim_control, settings, world,
 
         # Add current world properties to the HDF5 file.
         for p in world.properties:
-            hdf5.add_dataset(
-                p, sim_control.curr_step)
-        glyph_hdf5.add_step(
-            world, sim_control.curr_step)
+            hdf5.add_dataset(p, sim_control.curr_step)
+        glyph_hdf5.add_step(world, sim_control.curr_step)
         print ("Data written")
 
         # Log diagnostics (no forces during
         #   campaign).
-        diag.log_step(
-            sim_control.curr_step,
-            cycle, 0, world, None)
+        diag.log_step(sim_control.curr_step, cycle, 0, world, None)
 
         # Increment the simulation timestep counter.
         sim_control.curr_step += 1
@@ -1016,8 +1016,7 @@ def govern(sim_control, world, hdf5,
         # Apply accumulated forces from all
         #   politicians for this step.
         Pge.mu += pref_force_mu + aver_force_mu
-        Pge.sigma += (
-            pref_force_sigma + aver_force_sigma)
+        Pge.sigma += pref_force_sigma + aver_force_sigma
 
         # Clamp sigma to the floor to prevent
         #   zero or negative values
@@ -1034,7 +1033,7 @@ def govern(sim_control, world, hdf5,
         # Debug viz: render after Pge forces.
         if viz is not None:
             viz.update(
-                f"Govern  Cycle {cycle}"
+                f"(G) Cycle {cycle}"
                 f"  Step {step}")
 
         # Recompute citizen well-being from the
@@ -1047,10 +1046,8 @@ def govern(sim_control, world, hdf5,
         world.compute_patch_gaussian_stats()
         world.compute_patch_politician_stats()
         for p in world.properties:
-            hdf5.add_dataset(
-                p, sim_control.curr_step)
-        glyph_hdf5.add_step(
-            world, sim_control.curr_step)
+            hdf5.add_dataset(p, sim_control.curr_step)
+        glyph_hdf5.add_step(world, sim_control.curr_step)
 
         # Log diagnostics with the forces
         #   that were applied this step and the
@@ -1193,8 +1190,7 @@ def main():
 
         vote(sim_control, world)
 
-        govern(sim_control, world, hdf5,
-               glyph_hdf5, diag, cycle, viz)
+        govern(sim_control, world, hdf5, glyph_hdf5, diag, cycle, viz)
 
     # Finalize the debug visualization (no-op
     #   for the interactive pyqtgraph display).

@@ -582,26 +582,17 @@ class Politician():
         the Gaussian's identity (other code may
         hold references to the ext_* Gaussians).
         """
-        self.ext_policy_pref.mu[:] = (
-            self.innate_policy_pref.mu)
-        self.ext_policy_pref.sigma[:] = (
-            self.innate_policy_pref.sigma)
-        self.ext_policy_pref.theta[:] = (
-            self.innate_policy_pref.theta)
+        self.ext_policy_pref.mu[:] = self.innate_policy_pref.mu
+        self.ext_policy_pref.sigma[:] = self.innate_policy_pref.sigma
+        self.ext_policy_pref.theta[:] = self.innate_policy_pref.theta
 
-        self.ext_policy_aver.mu[:] = (
-            self.innate_policy_aver.mu)
-        self.ext_policy_aver.sigma[:] = (
-            self.innate_policy_aver.sigma)
-        self.ext_policy_aver.theta[:] = (
-            self.innate_policy_aver.theta)
+        self.ext_policy_aver.mu[:] = self.innate_policy_aver.mu
+        self.ext_policy_aver.sigma[:] = self.innate_policy_aver.sigma
+        self.ext_policy_aver.theta[:] = self.innate_policy_aver.theta
 
-        self.ext_trait.mu[:] = (
-            self.innate_trait.mu)
-        self.ext_trait.sigma[:] = (
-            self.innate_trait.sigma)
-        self.ext_trait.theta[:] = (
-            self.innate_trait.theta)
+        self.ext_trait.mu[:] = self.innate_trait.mu
+        self.ext_trait.sigma[:] = self.innate_trait.sigma
+        self.ext_trait.theta[:] = self.innate_trait.theta
 
 
     def adapt_to_patch(self, world):

@@ -517,87 +517,42 @@ class World():
             x = citizen.current_patch.x_location
             y = citizen.current_patch.y_location
             count[x, y] += 1
-            pp_mu[:, x, y] += (
-                citizen.stated_policy_pref.mu)
-            pp_sigma[:, x, y] += (
-                citizen.stated_policy_pref.sigma)
-            pp_ct[:, x, y] += (
-                citizen.stated_policy_pref.cos_theta)
-            pa_mu[:, x, y] += (
-                citizen.stated_policy_aver.mu)
-            pa_sigma[:, x, y] += (
-                citizen.stated_policy_aver.sigma)
-            pa_ct[:, x, y] += (
-                citizen.stated_policy_aver.cos_theta)
-            pi_mu[:, x, y] += (
-                citizen.ideal_policy_pref.mu)
-            pi_sigma[:, x, y] += (
-                citizen.ideal_policy_pref.sigma)
-            pi_ct[:, x, y] += (
-                citizen.ideal_policy_pref.cos_theta)
-            tp_mu[:, x, y] += (
-                citizen.stated_trait_pref.mu)
-            tp_sigma[:, x, y] += (
-                citizen.stated_trait_pref.sigma)
-            tp_ct[:, x, y] += (
-                citizen.stated_trait_pref.cos_theta)
-            ta_mu[:, x, y] += (
-                citizen.stated_trait_aver.mu)
-            ta_sigma[:, x, y] += (
-                citizen.stated_trait_aver.sigma)
-            ta_ct[:, x, y] += (
-                citizen.stated_trait_aver.cos_theta)
+            pp_mu[:, x, y] += citizen.stated_policy_pref.mu
+            pp_sigma[:, x, y] += citizen.stated_policy_pref.sigma
+            pp_ct[:, x, y] += citizen.stated_policy_pref.cos_theta
+            pa_mu[:, x, y] += citizen.stated_policy_aver.mu
+            pa_sigma[:, x, y] += citizen.stated_policy_aver.sigma
+            pa_ct[:, x, y] += citizen.stated_policy_aver.cos_theta
+            pi_mu[:, x, y] += citizen.ideal_policy_pref.mu
+            pi_sigma[:, x, y] += citizen.ideal_policy_pref.sigma
+            pi_ct[:, x, y] += citizen.ideal_policy_pref.cos_theta
+            tp_mu[:, x, y] += citizen.stated_trait_pref.mu
+            tp_sigma[:, x, y] += citizen.stated_trait_pref.sigma
+            tp_ct[:, x, y] += citizen.stated_trait_pref.cos_theta
+            ta_mu[:, x, y] += citizen.stated_trait_aver.mu
+            ta_sigma[:, x, y] += citizen.stated_trait_aver.sigma
+            ta_ct[:, x, y] += citizen.stated_trait_aver.cos_theta
 
         safe = np.where(count == 0, 1, count)
 
         idx = 1
         for d in range(ndp):
-            self.properties[idx].data = (
-                pp_mu[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pp_sigma[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pp_ct[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pa_mu[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pa_sigma[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pa_ct[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pi_mu[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pi_sigma[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                pi_ct[d] / safe)
-            idx += 1
+            self.properties[idx].data = pp_mu[d] / safe;       idx += 1
+            self.properties[idx].data = pp_sigma[d] / safe;    idx += 1
+            self.properties[idx].data = pp_ct[d] / safe;       idx += 1
+            self.properties[idx].data = pa_mu[d] / safe;       idx += 1
+            self.properties[idx].data = pa_sigma[d] / safe;    idx += 1
+            self.properties[idx].data = pa_ct[d] / safe;       idx += 1
+            self.properties[idx].data = pi_mu[d] / safe;       idx += 1
+            self.properties[idx].data = pi_sigma[d] / safe;    idx += 1
+            self.properties[idx].data = pi_ct[d] / safe;       idx += 1
         for d in range(ndt):
-            self.properties[idx].data = (
-                tp_mu[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                tp_sigma[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                tp_ct[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                ta_mu[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                ta_sigma[d] / safe)
-            idx += 1
-            self.properties[idx].data = (
-                ta_ct[d] / safe)
-            idx += 1
+            self.properties[idx].data = tp_mu[d] / safe;       idx += 1
+            self.properties[idx].data = tp_sigma[d] / safe;    idx += 1
+            self.properties[idx].data = tp_ct[d] / safe;       idx += 1
+            self.properties[idx].data = ta_mu[d] / safe;       idx += 1
+            self.properties[idx].data = ta_sigma[d] / safe;    idx += 1
+            self.properties[idx].data = ta_ct[d] / safe;       idx += 1
 
 
     def compute_patch_politician_stats(self):
@@ -646,42 +601,24 @@ class World():
                     continue
                 z = pol.zone.zone_index
                 count[z] += 1
-                inn_pp_mu[z]    += (
-                    pol.innate_policy_pref.mu)
-                inn_pp_sigma[z] += (
-                    pol.innate_policy_pref.sigma)
-                inn_pp_ct[z]    += (
-                    pol.innate_policy_pref.cos_theta)
-                inn_pa_mu[z]    += (
-                    pol.innate_policy_aver.mu)
-                inn_pa_sigma[z] += (
-                    pol.innate_policy_aver.sigma)
-                inn_pa_ct[z]    += (
-                    pol.innate_policy_aver.cos_theta)
-                ext_pp_mu[z]    += (
-                    pol.ext_policy_pref.mu)
-                ext_pp_sigma[z] += (
-                    pol.ext_policy_pref.sigma)
-                ext_pp_ct[z]    += (
-                    pol.ext_policy_pref.cos_theta)
-                ext_pa_mu[z]    += (
-                    pol.ext_policy_aver.mu)
-                ext_pa_sigma[z] += (
-                    pol.ext_policy_aver.sigma)
-                ext_pa_ct[z]    += (
-                    pol.ext_policy_aver.cos_theta)
-                inn_tr_mu[z]    += (
-                    pol.innate_trait.mu)
-                inn_tr_sigma[z] += (
-                    pol.innate_trait.sigma)
-                inn_tr_ct[z]    += (
-                    pol.innate_trait.cos_theta)
-                ext_tr_mu[z]    += (
-                    pol.ext_trait.mu)
-                ext_tr_sigma[z] += (
-                    pol.ext_trait.sigma)
-                ext_tr_ct[z]    += (
-                    pol.ext_trait.cos_theta)
+                inn_pp_mu[z]    += pol.innate_policy_pref.mu
+                inn_pp_sigma[z] += pol.innate_policy_pref.sigma
+                inn_pp_ct[z]    += pol.innate_policy_pref.cos_theta
+                inn_pa_mu[z]    += pol.innate_policy_aver.mu
+                inn_pa_sigma[z] += pol.innate_policy_aver.sigma
+                inn_pa_ct[z]    += pol.innate_policy_aver.cos_theta
+                ext_pp_mu[z]    += pol.ext_policy_pref.mu
+                ext_pp_sigma[z] += pol.ext_policy_pref.sigma
+                ext_pp_ct[z]    += pol.ext_policy_pref.cos_theta
+                ext_pa_mu[z]    += pol.ext_policy_aver.mu
+                ext_pa_sigma[z] += pol.ext_policy_aver.sigma
+                ext_pa_ct[z]    += pol.ext_policy_aver.cos_theta
+                inn_tr_mu[z]    += pol.innate_trait.mu
+                inn_tr_sigma[z] += pol.innate_trait.sigma
+                inn_tr_ct[z]    += pol.innate_trait.cos_theta
+                ext_tr_mu[z]    += pol.ext_trait.mu
+                ext_tr_sigma[z] += pol.ext_trait.sigma
+                ext_tr_ct[z]    += pol.ext_trait.cos_theta
 
             safe = np.where(count == 0, 1, count)
             s = safe[:, np.newaxis]
@@ -713,61 +650,25 @@ class World():
                  for i in range(self.x_num_patches)])
 
             for d in range(ndp):
-                self.properties[idx].data = (
-                    inn_pp_mu[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_pp_sigma[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_pp_ct[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_pa_mu[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_pa_sigma[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_pa_ct[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_pp_mu[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_pp_sigma[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_pp_ct[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_pa_mu[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_pa_sigma[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_pa_ct[zg, d])
-                idx += 1
+                self.properties[idx].data = inn_pp_mu[zg, d];    idx += 1
+                self.properties[idx].data = inn_pp_sigma[zg, d]; idx += 1
+                self.properties[idx].data = inn_pp_ct[zg, d];    idx += 1
+                self.properties[idx].data = inn_pa_mu[zg, d];    idx += 1
+                self.properties[idx].data = inn_pa_sigma[zg, d]; idx += 1
+                self.properties[idx].data = inn_pa_ct[zg, d];    idx += 1
+                self.properties[idx].data = ext_pp_mu[zg, d];    idx += 1
+                self.properties[idx].data = ext_pp_sigma[zg, d]; idx += 1
+                self.properties[idx].data = ext_pp_ct[zg, d];    idx += 1
+                self.properties[idx].data = ext_pa_mu[zg, d];    idx += 1
+                self.properties[idx].data = ext_pa_sigma[zg, d]; idx += 1
+                self.properties[idx].data = ext_pa_ct[zg, d];    idx += 1
             for d in range(ndt):
-                self.properties[idx].data = (
-                    inn_tr_mu[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_tr_sigma[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    inn_tr_ct[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_tr_mu[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_tr_sigma[zg, d])
-                idx += 1
-                self.properties[idx].data = (
-                    ext_tr_ct[zg, d])
-                idx += 1
+                self.properties[idx].data = inn_tr_mu[zg, d];    idx += 1
+                self.properties[idx].data = inn_tr_sigma[zg, d]; idx += 1
+                self.properties[idx].data = inn_tr_ct[zg, d];    idx += 1
+                self.properties[idx].data = ext_tr_mu[zg, d];    idx += 1
+                self.properties[idx].data = ext_tr_sigma[zg, d]; idx += 1
+                self.properties[idx].data = ext_tr_ct[zg, d];    idx += 1
 
 
     #def dump_state(self, settings, time_step):

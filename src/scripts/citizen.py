@@ -472,10 +472,10 @@ class Citizen():
 
             # Obtain the overlap between each citizen trait preference and
             #   aversion and each politician externally exposed trait.
-            self.Tcp_Tpx_ol.append(
-                    self.stated_trait_pref.integral(politician.ext_trait))
-            self.Tca_Tpx_ol.append(
-                    self.stated_trait_aver.integral(politician.ext_trait))
+            self.Tcp_Tpx_ol.append(self.stated_trait_pref.integral(
+                politician.ext_trait))
+            self.Tca_Tpx_ol.append(self.stated_trait_aver.integral(
+                politician.ext_trait))
 
 
     def policy_citizen_integrals(self):
@@ -485,13 +485,13 @@ class Citizen():
             #   aversion and the zone average values across all citizen of
             #   the zone.
             self.Pcp_Pcp_ol.append(
-                    self.stated_policy_pref.integral(zone.avg_Pcp))
+                self.stated_policy_pref.integral(zone.avg_Pcp))
             self.Pca_Pca_ol.append(
-                    self.stated_policy_aver.integral(zone.avg_Pca))
+                self.stated_policy_aver.integral(zone.avg_Pca))
             self.Pcp_Pca_ol.append(
-                    self.stated_policy_pref.integral(zone.avg_Pca))
+                self.stated_policy_pref.integral(zone.avg_Pca))
             self.Pca_Pcp_ol.append(
-                    self.stated_policy_aver.integral(zone.avg_Pcp))
+                self.stated_policy_aver.integral(zone.avg_Pcp))
 
 
     def trait_citizen_integrals(self):
@@ -501,13 +501,13 @@ class Citizen():
             #   aversion and the zone average values across all citizen of
             #   the zone.
             self.Tcp_Tcp_ol.append(
-                    self.stated_trait_pref.integral(zone.avg_Tcp))
+                self.stated_trait_pref.integral(zone.avg_Tcp))
             self.Tca_Tca_ol.append(
-                    self.stated_trait_aver.integral(zone.avg_Tca))
+                self.stated_trait_aver.integral(zone.avg_Tca))
             self.Tcp_Tca_ol.append(
-                    self.stated_trait_pref.integral(zone.avg_Tca))
+                self.stated_trait_pref.integral(zone.avg_Tca))
             self.Tca_Tcp_ol.append(
-                    self.stated_trait_aver.integral(zone.avg_Tcp))
+                self.stated_trait_aver.integral(zone.avg_Tcp))
 
 
     def policy_government_integrals(self, world):
@@ -684,43 +684,24 @@ class Citizen():
                 Ppp_sigma = politician.ext_policy_pref.sigma
                 Ppa_mu    = politician.ext_policy_aver.mu
                 Ppa_sigma = politician.ext_policy_aver.sigma
-                self.Pcp_pos_shift += (
-                    mag * f_pol * S_Pcp
-                    * np.sign(
-                        Ppp_mu
-                        - self.stated_policy_pref.mu))
-                self.Pcp_stddev_shift += (
-                    mag * f_pol * S_Pcp
-                    * np.sign(
-                        Ppp_sigma
-                        - self.stated_policy_pref.sigma))
-                self.Pca_pos_shift += (
-                    mag * f_pol * S_Pca
-                    * np.sign(
-                        Ppa_mu
-                        - self.stated_policy_aver.mu))
-                self.Pca_stddev_shift += (
-                    mag * f_pol * S_Pca
-                    * np.sign(
-                        Ppa_sigma
-                        - self.stated_policy_aver.sigma))
+                self.Pcp_pos_shift += (mag * f_pol * S_Pcp
+                    * np.sign(Ppp_mu - self.stated_policy_pref.mu))
+                self.Pcp_stddev_shift += (mag * f_pol * S_Pcp
+                    * np.sign(Ppp_sigma - self.stated_policy_pref.sigma))
+                self.Pca_pos_shift += (mag * f_pol * S_Pca
+                    * np.sign(Ppa_mu - self.stated_policy_aver.mu))
+                self.Pca_stddev_shift += (mag * f_pol * S_Pca
+                    * np.sign(Ppa_sigma - self.stated_policy_aver.sigma))
             else:
                 # Defensive branch: rigidity + targeted backlash.
                 # Pcp sigma narrows toward sigma_floor.
                 # Pca mu shifts toward politician's PREFERENCE
                 #   (not aversion), scaled by defensive_ratio.
                 Ppp_mu = politician.ext_policy_pref.mu
-                self.Pcp_stddev_shift += (
-                    mag * f_pol * S_Pcp
-                    * np.sign(
-                        self.sigma_floor
-                        - self.stated_policy_pref.sigma))
-                self.Pca_pos_shift += (
-                    mag * f_pol * self.defensive_ratio
-                    * S_Pca
-                    * np.sign(
-                        Ppp_mu
-                        - self.stated_policy_aver.mu))
+                self.Pcp_stddev_shift += (mag * f_pol * S_Pcp
+                    * np.sign(self.sigma_floor - self.stated_policy_pref.sigma))
+                self.Pca_pos_shift += (mag * f_pol * self.defensive_ratio
+                    * S_Pca * np.sign(Ppp_mu - self.stated_policy_aver.mu))
 
 
     def build_response_to_citizen_collective(self):
@@ -811,51 +792,27 @@ class Citizen():
             # Direction = sign(zone_avg_mu - citizen_mu):
             #   one-unit impulse per step, gated by susceptibility
             #   and trait_rate.
-            self.Pcp_pos_shift += (
-                cir * trait_rate * S_Pcp
-                * np.sign(
-                    zone.avg_Pcp.mu
-                    - self.stated_policy_pref.mu))
-            self.Pcp_stddev_shift += (
-                cir * trait_rate * S_Pcp
-                * np.sign(
-                    zone.avg_Pcp.sigma
-                    - self.stated_policy_pref.sigma))
-            self.Pca_pos_shift += (
-                cir * trait_rate * S_Pca
-                * np.sign(
-                    zone.avg_Pca.mu
-                    - self.stated_policy_aver.mu))
-            self.Pca_stddev_shift += (
-                cir * trait_rate * S_Pca
-                * np.sign(
-                    zone.avg_Pca.sigma
-                    - self.stated_policy_aver.sigma))
+            self.Pcp_pos_shift += (cir * trait_rate * S_Pcp
+                * np.sign(zone.avg_Pcp.mu - self.stated_policy_pref.mu))
+            self.Pcp_stddev_shift += (cir * trait_rate * S_Pcp
+                * np.sign(zone.avg_Pcp.sigma - self.stated_policy_pref.sigma))
+            self.Pca_pos_shift += (cir * trait_rate * S_Pca
+                * np.sign(zone.avg_Pca.mu - self.stated_policy_aver.mu))
+            self.Pca_stddev_shift += (cir * trait_rate * S_Pca
+                * np.sign(zone.avg_Pca.sigma - self.stated_policy_aver.sigma))
 
             # --- Trait position and spread shifts (§8.6.4) ---
-            # Same trait_rate drives trait acclimatization.
-            #   Tcp drifts toward avg_Tcp; Tca toward avg_Tca.
-            #   This is the sole mechanism for trait change.
-            self.Tcp_pos_shift += (
-                cir * trait_rate * S_Tcp
-                * np.sign(
-                    zone.avg_Tcp.mu
-                    - self.stated_trait_pref.mu))
-            self.Tcp_stddev_shift += (
-                cir * trait_rate * S_Tcp
-                * np.sign(
-                    zone.avg_Tcp.sigma
-                    - self.stated_trait_pref.sigma))
-            self.Tca_pos_shift += (
-                cir * trait_rate * S_Tca
-                * np.sign(
-                    zone.avg_Tca.mu
-                    - self.stated_trait_aver.mu))
-            self.Tca_stddev_shift += (
-                cir * trait_rate * S_Tca
-                * np.sign(
-                    zone.avg_Tca.sigma
-                    - self.stated_trait_aver.sigma))
+            # Same trait_rate drives trait acclimatization. Tcp drifts
+            #   toward avg_Tcp; Tca toward avg_Tca. This is the sole
+            #   mechanism for trait change.
+            self.Tcp_pos_shift += (cir * trait_rate * S_Tcp
+                * np.sign(zone.avg_Tcp.mu - self.stated_trait_pref.mu))
+            self.Tcp_stddev_shift += (cir * trait_rate * S_Tcp
+                * np.sign(zone.avg_Tcp.sigma - self.stated_trait_pref.sigma))
+            self.Tca_pos_shift += (cir * trait_rate * S_Tca
+                * np.sign(zone.avg_Tca.mu - self.stated_trait_aver.mu))
+            self.Tca_stddev_shift += (cir * trait_rate * S_Tca
+                * np.sign(zone.avg_Tca.sigma - self.stated_trait_aver.sigma))
 
 
     def apply_influence_shifts(self):

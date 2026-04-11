@@ -118,51 +118,25 @@ class SimControl():
 
         # Process all citizens (5 Gaussians each).
         for citizen in world.citizens:
-            update_limits(
-                citizen.stated_policy_pref,
-                policy_min, policy_max)
-            update_limits(
-                citizen.stated_policy_aver,
-                policy_min, policy_max)
-            update_limits(
-                citizen.ideal_policy_pref,
-                policy_min, policy_max)
-            update_limits(
-                citizen.stated_trait_pref,
-                trait_min, trait_max)
-            update_limits(
-                citizen.stated_trait_aver,
-                trait_min, trait_max)
+            update_limits(citizen.stated_policy_pref, policy_min, policy_max)
+            update_limits(citizen.stated_policy_aver, policy_min, policy_max)
+            update_limits(citizen.ideal_policy_pref, policy_min, policy_max)
+            update_limits(citizen.stated_trait_pref, trait_min, trait_max)
+            update_limits(citizen.stated_trait_aver, trait_min, trait_max)
 
-        # Process all politicians (6 Gaussians
-        #   each: innate+external for policy
-        #   pref/aver, innate+external for trait).
+        # Process all politicians (6 Gaussians each: innate+external for
+        #   policy pref/aver, innate+external for trait).
         for politician in world.politicians:
-            update_limits(
-                politician.innate_policy_pref,
-                policy_min, policy_max)
-            update_limits(
-                politician.innate_policy_aver,
-                policy_min, policy_max)
-            update_limits(
-                politician.ext_policy_pref,
-                policy_min, policy_max)
-            update_limits(
-                politician.ext_policy_aver,
-                policy_min, policy_max)
-            update_limits(
-                politician.innate_trait,
-                trait_min, trait_max)
-            update_limits(
-                politician.ext_trait,
-                trait_min, trait_max)
+            update_limits(politician.innate_policy_pref, policy_min, policy_max)
+            update_limits(politician.innate_policy_aver, policy_min, policy_max)
+            update_limits(politician.ext_policy_pref, policy_min, policy_max)
+            update_limits(politician.ext_policy_aver, policy_min, policy_max)
+            update_limits(politician.innate_trait, trait_min, trait_max)
+            update_limits(politician.ext_trait, trait_min, trait_max)
 
-        # Process the single government enacted
-        #   policy (policy dims only; government
-        #   has no traits).
-        update_limits(
-            world.government.enacted_policy,
-            policy_min, policy_max)
+        # Process the single government enacted policy (policy dims only;
+        #   government has no traits).
+        update_limits(world.government.enacted_policy, policy_min, policy_max)
 
         # Extend the range by 20% on each side
         #   to accommodate simulation drift.

@@ -2,15 +2,13 @@
 in policy/trait space using pyqtgraph 2-D projected
 curves (DESIGN §12.6).
 
-Each Gaussian is drawn as a 2-D curve whose vertical
-amplitude equals the unit-peak bell shape multiplied
-by cos(theta). This projects the 3-D rotated Gaussian
-onto the real (engaged) plane. Colour saturation then
-encodes |cos(theta)| — engaged agents appear in vivid
-colour while apathetic agents fade toward white. The
-combination of projected height and colour saturation
-gives a clear, at-a-glance picture of both position
-and engagement without requiring a 3-D viewport.
+Each dimension has two subplots. The real (cos θ)
+subplot projects onto the engaged plane; the
+imaginary (sin θ) subplot shows the complementary
+latent/apathetic component. Colour saturation
+encodes |cos(theta)| in both views so that a given
+agent always appears in the same colour across
+projections.
 
 Colour key:
   Blue  — citizen stated pref/aver
@@ -112,22 +110,22 @@ def engagement_color(base_rgb, cos_theta):
 # Gaussian curve computation (PSEUDOCODE §8.3).
 # -----------------------------------------------
 
-def projected_curve(mu, sigma, cos_theta,
+def projected_curve(mu, sigma, proj_factor,
                     n_points=N_CURVE_POINTS):
     """Compute 2-D projected Gaussian curve points.
 
-    The bell curve amplitude is multiplied by
-    cos(theta) to project the 3-D rotated Gaussian
-    onto the real (engaged) plane:
+    The bell curve amplitude is multiplied by a
+    projection factor — cos(theta) for the real
+    subplot, sin(theta) for the imaginary subplot:
 
         x = linspace(mu - 4*sigma, mu + 4*sigma)
-        y = exp(-(x-mu)^2 / (2*sigma^2)) * cos_th
+        y = amplitude * proj_factor
 
     Unit-peak normalization: the prefactor
-    1/(sigma * sqrt(2*pi)) is omitted so that fully
-    engaged curves peak at +/-1.0 regardless of
-    sigma. Sigma is already visible as curve width
-    so peak height would carry no independent
+    1/(sigma * sqrt(2*pi)) is omitted so that
+    fully engaged curves peak at +/-1.0 regardless
+    of sigma. Sigma is already visible as curve
+    width so peak height would carry no independent
     information.
 
     Parameters
@@ -136,12 +134,11 @@ def projected_curve(mu, sigma, cos_theta,
         Centre position on the policy/trait axis.
     sigma : float
         Standard deviation (width) of the bell.
-    cos_theta : float
-        cos(theta) where theta is the real-valued
-        angle extracted from the complex theta
-        stored in Gaussian objects. Positive for
-        preference curves (above the axis), negative
-        for aversion curves (below the axis).
+    proj_factor : float
+        Projection multiplier applied to the bell
+        amplitude. Pass cos(theta) for the real
+        (engaged) subplot or sin(theta) for the
+        imaginary (latent) subplot.
     n_points : int
         Number of sample points along the curve.
 
@@ -155,7 +152,7 @@ def projected_curve(mu, sigma, cos_theta,
         n_points)
     amplitude = np.exp(
         -(x - mu) ** 2 / (2.0 * sigma ** 2))
-    y = amplitude * cos_theta
+    y = amplitude * proj_factor
     return x, y
 
 
@@ -167,13 +164,12 @@ class PolicySpaceViz:
     """Debug visualization of policy/trait space
     using pyqtgraph 2-D projected curves.
 
-    Two-row subplot layout: the top row shows one
-    PlotWidget per policy dimension, the bottom row
-    shows one per trait dimension. In each subplot
-    Gaussians appear as projected bell curves whose
-    height encodes the engaged (real) component and
-    whose colour saturation encodes the engagement
-    level |cos(theta)|.
+    Four-row subplot layout: each policy and trait
+    dimension has a real (cos θ) subplot and an
+    imaginary (sin θ) subplot stacked vertically.
+    Curve height encodes the projection factor and
+    colour saturation encodes |cos(theta)| in both
+    views, keeping agent identity consistent.
 
     All PlotDataItem objects are pre-created during
     __init__. Each frame update changes only the
@@ -222,55 +218,85 @@ class PolicySpaceViz:
         self.window.setLayout(grid_layout)
         self._grid_layout = grid_layout
 
-        # Build a 2-row grid of PlotWidgets.
-        #   Row 0: one per policy dimension.
-        #   Row 1: one per trait dimension.
+        # Build a 4-row grid of PlotWidgets.
+        #   Row 0: policy real  (cos θ)
+        #   Row 1: policy imag  (sin θ)
+        #   Row 2: trait real   (cos θ)
+        #   Row 3: trait imag   (sin θ)
         n_cols = max(
             self.n_policy, self.n_trait)
         self.plots = [
             [None] * n_cols
-            for _ in range(2)]
+            for _ in range(4)]
+
+        grey_pen = pg.mkPen(
+            color=(180, 180, 180), width=1)
 
         for col in range(self.n_policy):
-            plot_w = pg.PlotWidget(
-                title=f"Policy Dim {col}")
-            plot_w.setLabel(
+            # Real (cos θ) subplot.
+            pw = pg.PlotWidget(
+                title=(f"Policy Dim {col}"
+                       f" (cos \u03b8)"))
+            pw.setLabel(
                 'bottom', 'Policy value')
-            plot_w.setLabel(
+            pw.setLabel(
                 'left', 'Projected amplitude')
-            plot_w.setXRange(
+            pw.setXRange(
                 world.policy_limits[0][col],
                 world.policy_limits[1][col])
-            plot_w.setYRange(-1.1, 1.1)
-            # Thin grey zero-line separating
-            #   prefs (above) from aversions
-            #   (below).
-            plot_w.addLine(
-                y=0, pen=pg.mkPen(
-                    color=(180, 180, 180),
-                    width=1))
+            pw.setYRange(-1.1, 1.1)
+            pw.addLine(y=0, pen=grey_pen)
+            grid_layout.addWidget(pw, 0, col)
+            self.plots[0][col] = pw
+
+            # Imaginary (sin θ) subplot.
+            pw_i = pg.PlotWidget(
+                title=(f"Policy Dim {col}"
+                       f" (sin \u03b8)"))
+            pw_i.setLabel(
+                'bottom', 'Policy value')
+            pw_i.setLabel(
+                'left', 'Projected amplitude')
+            pw_i.setXRange(
+                world.policy_limits[0][col],
+                world.policy_limits[1][col])
+            pw_i.setYRange(0, 1.1)
             grid_layout.addWidget(
-                plot_w, 0, col)
-            self.plots[0][col] = plot_w
+                pw_i, 1, col)
+            self.plots[1][col] = pw_i
 
         for col in range(self.n_trait):
-            plot_w = pg.PlotWidget(
-                title=f"Trait Dim {col}")
-            plot_w.setLabel(
+            # Real (cos θ) subplot.
+            pw = pg.PlotWidget(
+                title=(f"Trait Dim {col}"
+                       f" (cos \u03b8)"))
+            pw.setLabel(
                 'bottom', 'Trait value')
-            plot_w.setLabel(
+            pw.setLabel(
                 'left', 'Projected amplitude')
-            plot_w.setXRange(
+            pw.setXRange(
                 world.trait_limits[0][col],
                 world.trait_limits[1][col])
-            plot_w.setYRange(-1.1, 1.1)
-            plot_w.addLine(
-                y=0, pen=pg.mkPen(
-                    color=(180, 180, 180),
-                    width=1))
+            pw.setYRange(-1.1, 1.1)
+            pw.addLine(y=0, pen=grey_pen)
+            grid_layout.addWidget(pw, 2, col)
+            self.plots[2][col] = pw
+
+            # Imaginary (sin θ) subplot.
+            pw_i = pg.PlotWidget(
+                title=(f"Trait Dim {col}"
+                       f" (sin \u03b8)"))
+            pw_i.setLabel(
+                'bottom', 'Trait value')
+            pw_i.setLabel(
+                'left', 'Projected amplitude')
+            pw_i.setXRange(
+                world.trait_limits[0][col],
+                world.trait_limits[1][col])
+            pw_i.setYRange(0, 1.1)
             grid_layout.addWidget(
-                plot_w, 1, col)
-            self.plots[1][col] = plot_w
+                pw_i, 3, col)
+            self.plots[3][col] = pw_i
 
         # Pre-create PlotDataItem objects for
         #   every agent Gaussian that will be
@@ -314,93 +340,104 @@ class PolicySpaceViz:
 
     def _create_all_curves(self):
         """Pre-create one PlotDataItem per agent
-        Gaussian per dimension.
+        Gaussian per dimension in both the real
+        and imaginary subplots.
 
         Curve items are stored in per-agent dicts
         keyed by (gaussian_type_tag, dim_index).
+        Tags ending in '_i' are imaginary items.
         Tags used:
-          pp = policy pref     pa = policy aver
-          ip = ideal policy    tp = trait pref
-          ta = trait aver      tr = ext trait
+          pp / pp_i = policy pref
+          pa / pa_i = policy aver
+          ip / ip_i = ideal policy
+          tp / tp_i = trait pref
+          ta / ta_i = trait aver
+          tr / tr_i = ext trait
         """
         # --- Citizens ---
-        #   Per policy dim: stated pref, stated
-        #   aver, ideal policy. Per trait dim:
-        #   stated pref, stated aver.
+        #   Per policy dim: stated pref, stated aver, ideal policy
+        #   (real + imag). Per trait dim: stated pref, stated aver
+        #   (real + imag).
         self.citizen_curves = []
         for _ in self.world.citizens:
             items = {}
             for dim in range(self.n_policy):
                 pw = self.plots[0][dim]
+                pw_i = self.plots[1][dim]
                 items[('pp', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=CITIZEN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
+                items[('pp_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
                 items[('pa', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=CITIZEN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
+                items[('pa_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
                 items[('ip', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=IDEAL_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=IDEAL_RGB, width=1))
+                items[('ip_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=IDEAL_RGB, width=1))
             for dim in range(self.n_trait):
-                pw = self.plots[1][dim]
+                pw = self.plots[2][dim]
+                pw_i = self.plots[3][dim]
                 items[('tp', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=CITIZEN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
+                items[('tp_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
                 items[('ta', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=CITIZEN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
+                items[('ta_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=CITIZEN_RGB, width=1))
             self.citizen_curves.append(items)
 
         # --- Politicians ---
-        #   Per policy dim: ext pref, ext aver.
-        #   Per trait dim: ext trait.
+        #   Per policy dim: ext pref, ext aver (real + imag).
+        #   Per trait dim: ext trait (real + imag).
         self.politician_curves = []
         for _ in self.world.politicians:
             items = {}
             for dim in range(self.n_policy):
                 pw = self.plots[0][dim]
+                pw_i = self.plots[1][dim]
                 items[('pp', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=POLITICIAN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=POLITICIAN_RGB, width=1))
+                items[('pp_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=POLITICIAN_RGB, width=1))
                 items[('pa', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=POLITICIAN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=POLITICIAN_RGB, width=1))
+                items[('pa_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=POLITICIAN_RGB, width=1))
             for dim in range(self.n_trait):
-                pw = self.plots[1][dim]
+                pw = self.plots[2][dim]
+                pw_i = self.plots[3][dim]
                 items[('tr', dim)] = pw.plot(
-                    pen=pg.mkPen(
-                        color=POLITICIAN_RGB,
-                        width=1))
+                    pen=pg.mkPen(color=POLITICIAN_RGB, width=1))
+                items[('tr_i', dim)] = pw_i.plot(
+                    pen=pg.mkPen(color=POLITICIAN_RGB, width=1))
             self.politician_curves.append(items)
 
         # --- Government ---
-        #   One enacted-policy curve per policy
-        #   dimension (government has no traits).
+        #   One enacted-policy curve per policy dimension
+        #   (real + imag). Government has no traits.
         self.government_curves = {}
         for dim in range(self.n_policy):
             pw = self.plots[0][dim]
-            self.government_curves[dim] = (
-                pw.plot(pen=pg.mkPen(
-                    color=GOVERNMENT_RGB,
-                    width=2)))
+            pw_i = self.plots[1][dim]
+            self.government_curves[('ge', dim)] = pw.plot(
+                pen=pg.mkPen(color=GOVERNMENT_RGB, width=2))
+            self.government_curves[('ge_i', dim)] = pw_i.plot(
+                pen=pg.mkPen(color=GOVERNMENT_RGB, width=2))
 
     # -------------------------------------------
     # Per-curve update helper.
     # -------------------------------------------
 
     def _update_curve(self, curve_item, mu,
-                      sigma, theta_imag,
-                      base_rgb, width):
-        """Recompute one curve's projected shape and
-        engagement colour, then push both into the
-        pre-existing PlotDataItem.
+                      sigma, proj_factor,
+                      cos_theta, base_rgb,
+                      width):
+        """Recompute one curve's projected shape
+        and engagement colour, then push both
+        into the pre-existing PlotDataItem.
 
         Parameters
         ----------
@@ -411,24 +448,55 @@ class PolicySpaceViz:
             or trait axis.
         sigma : float
             Standard deviation (width) of bell.
-        theta_imag : float
-            Imaginary part of the complex theta
-            stored in the Gaussian object (the
-            real-valued rotation angle in radians).
+        proj_factor : float
+            Projection multiplier: cos(theta) for
+            real subplots, sin(theta) for
+            imaginary subplots.
+        cos_theta : float
+            cos(theta), used only for engagement
+            colour — the same in both views so
+            agent identity is consistent.
         base_rgb : tuple of int
             Base colour for this agent type.
         width : float
             Line width in pixels.
         """
-        cos_theta = np.cos(theta_imag)
         x_data, y_data = projected_curve(
-            mu, sigma, cos_theta)
+            mu, sigma, proj_factor)
         color = engagement_color(
             base_rgb, cos_theta)
         curve_item.setData(
             x_data, y_data,
             pen=pg.mkPen(
                 color=color, width=width))
+
+    def _update_pair(self, real_item, imag_item,
+                     mu, sigma, theta_imag,
+                     base_rgb, width):
+        """Update both the real and imaginary curve
+        items for a single Gaussian. Computes
+        cos(theta) and sin(theta) once and calls
+        _update_curve() twice.
+
+        Parameters
+        ----------
+        real_item : PlotDataItem
+            Curve in the real (cos θ) subplot.
+        imag_item : PlotDataItem
+            Curve in the imaginary (sin θ) subplot.
+        mu, sigma, theta_imag, base_rgb, width :
+            Same as _update_curve; theta_imag is
+            the imaginary part of the complex theta
+            (real-valued angle in radians).
+        """
+        cos_th = np.cos(theta_imag)
+        sin_th = np.sin(theta_imag)
+        self._update_curve(
+            real_item, mu, sigma,
+            cos_th, cos_th, base_rgb, width)
+        self._update_curve(
+            imag_item, mu, sigma,
+            sin_th, cos_th, base_rgb, width)
 
     # -------------------------------------------
     # Per-step frame update.
@@ -459,82 +527,54 @@ class PolicySpaceViz:
             aver = citizen.stated_policy_aver
             ideal = citizen.ideal_policy_pref
             for dim in range(self.n_policy):
-                self._update_curve(
-                    items[('pp', dim)],
-                    pref.mu[dim],
-                    pref.sigma[dim],
-                    pref.theta[dim].imag,
+                self._update_pair(items[('pp', dim)], items[('pp_i', dim)],
+                    pref.mu[dim], pref.sigma[dim], pref.theta[dim].imag,
                     CITIZEN_RGB, 1)
-                self._update_curve(
-                    items[('pa', dim)],
-                    aver.mu[dim],
-                    aver.sigma[dim],
-                    aver.theta[dim].imag,
+                self._update_pair(items[('pa', dim)], items[('pa_i', dim)],
+                    aver.mu[dim], aver.sigma[dim], aver.theta[dim].imag,
                     CITIZEN_RGB, 1)
-                self._update_curve(
-                    items[('ip', dim)],
-                    ideal.mu[dim],
-                    ideal.sigma[dim],
-                    ideal.theta[dim].imag,
+                self._update_pair(items[('ip', dim)], items[('ip_i', dim)],
+                    ideal.mu[dim], ideal.sigma[dim], ideal.theta[dim].imag,
                     IDEAL_RGB, 1)
 
             tpref = citizen.stated_trait_pref
             taver = citizen.stated_trait_aver
             for dim in range(self.n_trait):
-                self._update_curve(
-                    items[('tp', dim)],
-                    tpref.mu[dim],
-                    tpref.sigma[dim],
-                    tpref.theta[dim].imag,
+                self._update_pair(items[('tp', dim)], items[('tp_i', dim)],
+                    tpref.mu[dim], tpref.sigma[dim], tpref.theta[dim].imag,
                     CITIZEN_RGB, 1)
-                self._update_curve(
-                    items[('ta', dim)],
-                    taver.mu[dim],
-                    taver.sigma[dim],
-                    taver.theta[dim].imag,
+                self._update_pair(items[('ta', dim)], items[('ta_i', dim)],
+                    taver.mu[dim], taver.sigma[dim], taver.theta[dim].imag,
                     CITIZEN_RGB, 1)
 
         # --- Politicians (red) ---
         for pol_idx, politician in enumerate(
                 self.world.politicians):
-            items = (
-                self.politician_curves[pol_idx])
+            items = self.politician_curves[pol_idx]
 
             pref = politician.ext_policy_pref
             aver = politician.ext_policy_aver
             for dim in range(self.n_policy):
-                self._update_curve(
-                    items[('pp', dim)],
-                    pref.mu[dim],
-                    pref.sigma[dim],
-                    pref.theta[dim].imag,
+                self._update_pair(items[('pp', dim)], items[('pp_i', dim)],
+                    pref.mu[dim], pref.sigma[dim], pref.theta[dim].imag,
                     POLITICIAN_RGB, 1)
-                self._update_curve(
-                    items[('pa', dim)],
-                    aver.mu[dim],
-                    aver.sigma[dim],
-                    aver.theta[dim].imag,
+                self._update_pair(items[('pa', dim)], items[('pa_i', dim)],
+                    aver.mu[dim], aver.sigma[dim], aver.theta[dim].imag,
                     POLITICIAN_RGB, 1)
 
             trait = politician.ext_trait
             for dim in range(self.n_trait):
-                self._update_curve(
-                    items[('tr', dim)],
-                    trait.mu[dim],
-                    trait.sigma[dim],
-                    trait.theta[dim].imag,
+                self._update_pair(items[('tr', dim)], items[('tr_i', dim)],
+                    trait.mu[dim], trait.sigma[dim], trait.theta[dim].imag,
                     POLITICIAN_RGB, 1)
 
         # --- Government (black, policy only) ---
-        enacted = (
-            self.world.government.enacted_policy)
+        enacted = self.world.government.enacted_policy
         for dim in range(self.n_policy):
-            self._update_curve(
-                self.government_curves[dim],
-                enacted.mu[dim],
-                enacted.sigma[dim],
-                enacted.theta[dim].imag,
-                GOVERNMENT_RGB, 2)
+            self._update_pair(self.government_curves[('ge', dim)],
+                self.government_curves[('ge_i', dim)],
+                enacted.mu[dim], enacted.sigma[dim],
+                enacted.theta[dim].imag, GOVERNMENT_RGB, 2)
 
         # Record a snapshot of the current state
         # for post-run replay (§8.7).
@@ -584,68 +624,40 @@ class PolicySpaceViz:
             aver = citizen.stated_policy_aver
             ideal = citizen.ideal_policy_pref
             for dim in range(self.n_policy):
-                snapshot[("cit", cit_idx,
-                    "pp", dim)] = (
-                    pref.mu[dim],
-                    pref.sigma[dim],
-                    pref.theta[dim].imag)
-                snapshot[("cit", cit_idx,
-                    "pa", dim)] = (
-                    aver.mu[dim],
-                    aver.sigma[dim],
-                    aver.theta[dim].imag)
-                snapshot[("cit", cit_idx,
-                    "ip", dim)] = (
-                    ideal.mu[dim],
-                    ideal.sigma[dim],
-                    ideal.theta[dim].imag)
+                snapshot[("cit", cit_idx, "pp", dim)] = (pref.mu[dim],
+                    pref.sigma[dim], pref.theta[dim].imag)
+                snapshot[("cit", cit_idx, "pa", dim)] = (aver.mu[dim],
+                    aver.sigma[dim], aver.theta[dim].imag)
+                snapshot[("cit", cit_idx, "ip", dim)] = (ideal.mu[dim],
+                    ideal.sigma[dim], ideal.theta[dim].imag)
 
             tpref = citizen.stated_trait_pref
             taver = citizen.stated_trait_aver
             for dim in range(self.n_trait):
-                snapshot[("cit", cit_idx,
-                    "tp", dim)] = (
-                    tpref.mu[dim],
-                    tpref.sigma[dim],
-                    tpref.theta[dim].imag)
-                snapshot[("cit", cit_idx,
-                    "ta", dim)] = (
-                    taver.mu[dim],
-                    taver.sigma[dim],
-                    taver.theta[dim].imag)
+                snapshot[("cit", cit_idx, "tp", dim)] = (tpref.mu[dim],
+                    tpref.sigma[dim], tpref.theta[dim].imag)
+                snapshot[("cit", cit_idx, "ta", dim)] = (taver.mu[dim],
+                    taver.sigma[dim], taver.theta[dim].imag)
 
         for pol_idx, politician in enumerate(
                 self.world.politicians):
             pref = politician.ext_policy_pref
             aver = politician.ext_policy_aver
             for dim in range(self.n_policy):
-                snapshot[("pol", pol_idx,
-                    "pp", dim)] = (
-                    pref.mu[dim],
-                    pref.sigma[dim],
-                    pref.theta[dim].imag)
-                snapshot[("pol", pol_idx,
-                    "pa", dim)] = (
-                    aver.mu[dim],
-                    aver.sigma[dim],
-                    aver.theta[dim].imag)
+                snapshot[("pol", pol_idx, "pp", dim)] = (pref.mu[dim],
+                    pref.sigma[dim], pref.theta[dim].imag)
+                snapshot[("pol", pol_idx, "pa", dim)] = (aver.mu[dim],
+                    aver.sigma[dim], aver.theta[dim].imag)
 
             trait = politician.ext_trait
             for dim in range(self.n_trait):
-                snapshot[("pol", pol_idx,
-                    "tr", dim)] = (
-                    trait.mu[dim],
-                    trait.sigma[dim],
-                    trait.theta[dim].imag)
+                snapshot[("pol", pol_idx, "tr", dim)] = (trait.mu[dim],
+                    trait.sigma[dim], trait.theta[dim].imag)
 
-        enacted = (
-            self.world.government.enacted_policy)
+        enacted = self.world.government.enacted_policy
         for dim in range(self.n_policy):
-            snapshot[("gov", 0,
-                "ge", dim)] = (
-                enacted.mu[dim],
-                enacted.sigma[dim],
-                enacted.theta[dim].imag)
+            snapshot[("gov", 0, "ge", dim)] = (enacted.mu[dim],
+                enacted.sigma[dim], enacted.theta[dim].imag)
 
         self.frames.append(snapshot)
 
@@ -684,8 +696,7 @@ class PolicySpaceViz:
         # --- Transport control bar --------------
         # Horizontal row of buttons, a scrubber
         # slider, and status labels. Inserted at
-        # grid row 2 below the policy (row 0)
-        # and trait (row 1) plot rows.
+        # grid row 4 below the four plot rows.
         control_bar = QtWidgets.QHBoxLayout()
 
         back_btn = (
@@ -709,6 +720,30 @@ class PolicySpaceViz:
         self._frame_label = (
             QtWidgets.QLabel(""))
 
+        # Lock the speed and frame labels to
+        # fixed widths so the scrubber slider
+        # never shifts as digit counts change.
+        # Widths are computed from the widest
+        # plausible strings using the label's
+        # own font metrics.
+        speed_metrics = (
+            self._speed_label.fontMetrics())
+        speed_width = (
+            speed_metrics.horizontalAdvance(
+                "9999×") + 12)
+        self._speed_label.setFixedWidth(
+            speed_width)
+
+        frame_metrics = (
+            self._frame_label.fontMetrics())
+        frame_width = (
+            frame_metrics.horizontalAdvance(
+                "(C) Cycle 999  Step 9999"
+                "  [Frame 99999 / 99999]")
+            + 12)
+        self._frame_label.setFixedWidth(
+            frame_width)
+
         control_bar.addWidget(back_btn)
         control_bar.addWidget(self._play_btn)
         control_bar.addWidget(fwd_btn)
@@ -720,11 +755,11 @@ class PolicySpaceViz:
             self._frame_label)
 
         # Insert the control bar spanning all
-        # columns below the two plot rows.
+        # columns below the four plot rows.
         n_cols = max(
             self.n_policy, self.n_trait)
         self._grid_layout.addLayout(
-            control_bar, 2, 0, 1, n_cols)
+            control_bar, 4, 0, 1, n_cols)
 
         # --- Auto-play timer --------------------
         self._timer = QtCore.QTimer()
@@ -762,11 +797,11 @@ class PolicySpaceViz:
     def _render_frame(self, frame_index):
         """Render a single recorded frame by
         reading stored (mu, sigma, theta_imag)
-        triples and calling _update_curve() for
-        each curve. Uses the identical rendering
-        path as the live display to ensure visual
-        consistency between live and replayed
-        output.
+        triples and calling _update_pair() for
+        each Gaussian's real and imaginary curves.
+        Uses the identical rendering path as the
+        live display to ensure visual consistency
+        between live and replayed output.
 
         Parameters
         ----------
@@ -783,84 +818,46 @@ class PolicySpaceViz:
         self._frame_label.setText(title)
 
         # --- Citizens (blue / green) -----------
-        for cit_idx in range(
-                len(self.world.citizens)):
-            items = (
-                self.citizen_curves[cit_idx])
+        for cit_idx in range(len(self.world.citizens)):
+            items = self.citizen_curves[cit_idx]
             for dim in range(self.n_policy):
-                mu, sig, th = snapshot[
-                    ("cit", cit_idx,
-                     "pp", dim)]
-                self._update_curve(
-                    items[('pp', dim)],
-                    mu, sig, th,
-                    CITIZEN_RGB, 1)
-                mu, sig, th = snapshot[
-                    ("cit", cit_idx,
-                     "pa", dim)]
-                self._update_curve(
-                    items[('pa', dim)],
-                    mu, sig, th,
-                    CITIZEN_RGB, 1)
-                mu, sig, th = snapshot[
-                    ("cit", cit_idx,
-                     "ip", dim)]
-                self._update_curve(
-                    items[('ip', dim)],
-                    mu, sig, th,
-                    IDEAL_RGB, 1)
+                mu, sig, th = snapshot[("cit", cit_idx, "pp", dim)]
+                self._update_pair(items[('pp', dim)], items[('pp_i', dim)],
+                    mu, sig, th, CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[("cit", cit_idx, "pa", dim)]
+                self._update_pair(items[('pa', dim)], items[('pa_i', dim)],
+                    mu, sig, th, CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[("cit", cit_idx, "ip", dim)]
+                self._update_pair(items[('ip', dim)], items[('ip_i', dim)],
+                    mu, sig, th, IDEAL_RGB, 1)
             for dim in range(self.n_trait):
-                mu, sig, th = snapshot[
-                    ("cit", cit_idx,
-                     "tp", dim)]
-                self._update_curve(
-                    items[('tp', dim)],
-                    mu, sig, th,
-                    CITIZEN_RGB, 1)
-                mu, sig, th = snapshot[
-                    ("cit", cit_idx,
-                     "ta", dim)]
-                self._update_curve(
-                    items[('ta', dim)],
-                    mu, sig, th,
-                    CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[("cit", cit_idx, "tp", dim)]
+                self._update_pair(items[('tp', dim)], items[('tp_i', dim)],
+                    mu, sig, th, CITIZEN_RGB, 1)
+                mu, sig, th = snapshot[("cit", cit_idx, "ta", dim)]
+                self._update_pair(items[('ta', dim)], items[('ta_i', dim)],
+                    mu, sig, th, CITIZEN_RGB, 1)
 
         # --- Politicians (red) -----------------
-        for pol_idx in range(
-                len(self.world.politicians)):
-            items = (
-                self.politician_curves[pol_idx])
+        for pol_idx in range(len(self.world.politicians)):
+            items = self.politician_curves[pol_idx]
             for dim in range(self.n_policy):
-                mu, sig, th = snapshot[
-                    ("pol", pol_idx,
-                     "pp", dim)]
-                self._update_curve(
-                    items[('pp', dim)],
-                    mu, sig, th,
-                    POLITICIAN_RGB, 1)
-                mu, sig, th = snapshot[
-                    ("pol", pol_idx,
-                     "pa", dim)]
-                self._update_curve(
-                    items[('pa', dim)],
-                    mu, sig, th,
-                    POLITICIAN_RGB, 1)
+                mu, sig, th = snapshot[("pol", pol_idx, "pp", dim)]
+                self._update_pair(items[('pp', dim)], items[('pp_i', dim)],
+                    mu, sig, th, POLITICIAN_RGB, 1)
+                mu, sig, th = snapshot[("pol", pol_idx, "pa", dim)]
+                self._update_pair(items[('pa', dim)], items[('pa_i', dim)],
+                    mu, sig, th, POLITICIAN_RGB, 1)
             for dim in range(self.n_trait):
-                mu, sig, th = snapshot[
-                    ("pol", pol_idx,
-                     "tr", dim)]
-                self._update_curve(
-                    items[('tr', dim)],
-                    mu, sig, th,
-                    POLITICIAN_RGB, 1)
+                mu, sig, th = snapshot[("pol", pol_idx, "tr", dim)]
+                self._update_pair(items[('tr', dim)], items[('tr_i', dim)],
+                    mu, sig, th, POLITICIAN_RGB, 1)
 
         # --- Government (black, policy only) ---
         for dim in range(self.n_policy):
-            mu, sig, th = snapshot[
-                ("gov", 0, "ge", dim)]
-            self._update_curve(
-                self.government_curves[dim],
-                mu, sig, th,
+            mu, sig, th = snapshot[("gov", 0, "ge", dim)]
+            self._update_pair(self.government_curves[('ge', dim)],
+                self.government_curves[('ge_i', dim)], mu, sig, th,
                 GOVERNMENT_RGB, 2)
 
         self.app.processEvents()

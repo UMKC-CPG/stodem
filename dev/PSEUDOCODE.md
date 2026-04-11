@@ -519,29 +519,34 @@ function integral(G1, G2):
         xi     = alpha1 * alpha2 / zeta
         dist   = G1.mu[d] - G2.mu[d]
 
-        result[d] = sqrt(pi / zeta)
-                  * exp(-xi * dist^2)
-                  * cos(Im(G1.theta[d]))
-                  * cos(Im(G2.theta[d]))
-                  * G1.self_norm[d]
-                  * G2.self_norm[d]
+        raw = sqrt(pi / zeta)
+            * exp(-xi * dist^2)
+            * cos(Im(G1.theta[d]))
+            * cos(Im(G2.theta[d]))
+        norm = G1.self_norm[d]
+             * G2.self_norm[d]
+        result[d] = raw / norm   if norm > 0
+                    0             otherwise
     return result
 ```
 
-where `self_norm = 1 / sqrt(pi / (2 * alpha))` is the
-normalization factor that makes each Gaussian have unit
-self-overlap when theta = 0.
+where `self_norm = (pi * sigma^2)^0.25 * |cos(theta)|`
+is the square root of the 1-D Gaussian's self-overlap.
+Dividing by the product of two self-norms bounds the
+result to [-1, +1] and gives I(G,G) = 1.
 
 ---
 
 ## 8. Debug Visualization — Policy/Trait Space
 
 pyqtgraph visualization of individual agent
-Gaussians in policy/trait space. 2-D projected
-curves with colour saturation encoding engagement.
-Includes live display during the simulation run
-and post-simulation replay with transport controls.
-See DESIGN §12.6 for the full specification.
+Gaussians in policy/trait space. Dual 2-D
+projected curves — real (cos θ) and imaginary
+(sin θ) — with colour saturation encoding
+engagement. Includes live display during the
+simulation run and post-simulation replay with
+transport controls. See DESIGN §12.6 for the
+full specification.
 
 ### 8.1 Initialization
 
@@ -555,30 +560,62 @@ function PolicySpaceViz(world, settings):
     app    = pyqtgraph.mkQApp()
     window = QWidget with QGridLayout
 
-    # Build 2-row grid of PlotWidgets.
-    #   Row 0 = policy dims, row 1 = trait dims.
-    plots = 2-D array [2, n_cols], all None
+    # Build 4-row grid of PlotWidgets.
+    #   Row 0 = policy real (cos θ)
+    #   Row 1 = policy imaginary (sin θ)
+    #   Row 2 = trait real (cos θ)
+    #   Row 3 = trait imaginary (sin θ)
+    plots = 2-D array [4, n_cols], all None
 
     for col in 0 .. n_policy - 1:
-        pw = PlotWidget(title="Policy Dim " + col)
-        pw.x_range = [world.policy_limits[0][col],
-                       world.policy_limits[1][col]]
+        # Real projection subplot.
+        pw = PlotWidget(
+            title="Policy Dim " + col
+                  + " (cos θ)")
+        pw.x_range =
+            [world.policy_limits[0][col],
+             world.policy_limits[1][col]]
         pw.y_range = [-1.1, 1.1]
         pw.add_zero_line(y=0, grey)
         plots[0, col] = pw
         add pw to grid at (row=0, col)
 
+        # Imaginary projection subplot.
+        pw_i = PlotWidget(
+            title="Policy Dim " + col
+                  + " (sin θ)")
+        pw_i.x_range = same as pw
+        pw_i.y_range = [0, 1.1]
+        plots[1, col] = pw_i
+        add pw_i to grid at (row=1, col)
+
     for col in 0 .. n_trait - 1:
-        pw = PlotWidget(title="Trait Dim " + col)
-        pw.x_range = [world.trait_limits[0][col],
-                       world.trait_limits[1][col]]
+        # Real projection subplot.
+        pw = PlotWidget(
+            title="Trait Dim " + col
+                  + " (cos θ)")
+        pw.x_range =
+            [world.trait_limits[0][col],
+             world.trait_limits[1][col]]
         pw.y_range = [-1.1, 1.1]
         pw.add_zero_line(y=0, grey)
-        plots[1, col] = pw
-        add pw to grid at (row=1, col)
+        plots[2, col] = pw
+        add pw to grid at (row=2, col)
+
+        # Imaginary projection subplot.
+        pw_i = PlotWidget(
+            title="Trait Dim " + col
+                  + " (sin θ)")
+        pw_i.x_range = same as pw
+        pw_i.y_range = [0, 1.1]
+        plots[3, col] = pw_i
+        add pw_i to grid at (row=3, col)
 
     # Pre-create curve items (§8.2).
     create_all_curves()
+
+    # Build legend in first policy real subplot.
+    build_legend(plots[0, 0])
 
     window.show()
     app.processEvents()
@@ -591,9 +628,11 @@ function PolicySpaceViz(world, settings):
 ### 8.2 Curve Pre-Creation
 
 Pre-create one PlotDataItem per agent Gaussian
-per dimension. These objects persist for the life
-of the visualization — only their data and pen
-colour change each frame.
+per dimension in both the real and imaginary
+subplots. Tags ending in `_i` denote imaginary
+projection curves. All objects persist for the
+life of the visualization — only their data and
+pen colour change each frame.
 
 ```
 function create_all_curves():
@@ -601,40 +640,40 @@ function create_all_curves():
     for each citizen in world.citizens:
         items = {}
         for dim in 0 .. n_policy - 1:
-            pw = plots[0, dim]
-            items[("pp", dim)] = pw.plot(BLUE)
-            items[("pa", dim)] = pw.plot(BLUE)
-            items[("ip", dim)] = pw.plot(GREEN)
+            pw   = plots[0, dim]   # real
+            pw_i = plots[1, dim]   # imag
+            items[("pp", dim)]   = pw.plot(BLUE)
+            items[("pp_i", dim)] = pw_i.plot(BLUE)
+            items[("pa", dim)]   = pw.plot(BLUE)
+            items[("pa_i", dim)] = pw_i.plot(BLUE)
+            items[("ip", dim)]   = pw.plot(GREEN)
+            items[("ip_i", dim)] = pw_i.plot(GREEN)
         for dim in 0 .. n_trait - 1:
-            pw = plots[1, dim]
-            items[("tp", dim)] = pw.plot(BLUE)
-            items[("ta", dim)] = pw.plot(BLUE)
+            pw   = plots[2, dim]   # real
+            pw_i = plots[3, dim]   # imag
+            items[("tp", dim)]   = pw.plot(BLUE)
+            items[("tp_i", dim)] = pw_i.plot(BLUE)
+            items[("ta", dim)]   = pw.plot(BLUE)
+            items[("ta_i", dim)] = pw_i.plot(BLUE)
         citizen_curves.append(items)
 
-    politician_curves = []
-    for each politician in world.politicians:
-        items = {}
-        for dim in 0 .. n_policy - 1:
-            pw = plots[0, dim]
-            items[("pp", dim)] = pw.plot(RED)
-            items[("pa", dim)] = pw.plot(RED)
-        for dim in 0 .. n_trait - 1:
-            pw = plots[1, dim]
-            items[("tr", dim)] = pw.plot(RED)
-        politician_curves.append(items)
+    # Politicians: same pattern with RED,
+    # tags pp/pa (policy) and tr (trait),
+    # plus _i counterparts in imag subplots.
 
-    government_curves = {}
-    for dim in 0 .. n_policy - 1:
-        pw = plots[0, dim]
-        government_curves[dim] = pw.plot(BLACK)
+    # Government: same pattern with BLACK,
+    # per-dim entries in policy only,
+    # plus _i counterparts in imag subplots.
 ```
 
 ### 8.3 Gaussian Curve Computation
 
 Compute the 2-D projected curve for a single
-Gaussian on one dimension. The bell curve amplitude
-is multiplied by cos(theta) to project onto the
-real (engaged) plane.
+Gaussian on one dimension. The bell curve
+amplitude is multiplied by a projection factor —
+cos(theta) for the real subplot, sin(theta) for
+the imaginary subplot — to project onto the
+corresponding plane.
 
 Unit-peak normalization: the `1/(sigma*sqrt(2*pi))`
 prefactor is omitted because peak height is
@@ -642,7 +681,7 @@ determined solely by sigma, which is already
 visible as curve width.
 
 ```
-function projected_curve(mu, sigma, cos_theta,
+function projected_curve(mu, sigma, proj_factor,
                          n_points = 80):
     x = linspace(mu - 4 * sigma,
                  mu + 4 * sigma, n_points)
@@ -650,19 +689,22 @@ function projected_curve(mu, sigma, cos_theta,
     amplitude = exp(-(x - mu)^2
                     / (2 * sigma^2))
 
-    y = amplitude * cos_theta
+    y = amplitude * proj_factor
 
     return x, y
 ```
 
-Sign convention (DESIGN §4.1) produces correct
-visual geometry:
+Sign convention (DESIGN §4.1) in the real subplot:
 - Preference (theta in [0, pi/2)):
     cos > 0, curve above axis (+y).
 - Aversion (theta in (pi/2, pi]):
     cos < 0, curve below axis (-y).
 - Apathy (theta near pi/2):
     cos near 0, curve flattens.
+
+In the imaginary subplot sin(theta) ≥ 0 always,
+so all curves sit above the axis regardless of
+preference/aversion type.
 
 ### 8.4 Engagement Colour
 
@@ -687,22 +729,31 @@ function engagement_color(base_rgb, cos_theta):
 ### 8.5 Per-Curve Update
 
 Update one pre-created curve item with new
-projected data and engagement-coloured pen.
+projected data and engagement-coloured pen. The
+caller passes the projection factor (cos_theta
+for real subplots, sin_theta for imaginary) and
+cos_theta separately for colour computation —
+engagement colour is always based on cos(theta)
+in both views to maintain agent identity.
 
 ```
 function update_curve(curve_item, mu, sigma,
-                      theta_imag, base_rgb, w):
-    cos_theta = cos(theta_imag)
-    x, y = projected_curve(mu, sigma, cos_theta)
-    color = engagement_color(base_rgb, cos_theta)
+                      proj_factor, cos_theta,
+                      base_rgb, w):
+    x, y = projected_curve(
+        mu, sigma, proj_factor)
+    color = engagement_color(
+        base_rgb, cos_theta)
     curve_item.setData(x, y, pen=(color, w))
 ```
 
 ### 8.6 Update (per simulation step)
 
-Called once per simulation step. Refreshes every
-pre-created curve item with the current agent
-state and flushes the Qt event loop.
+Called once per simulation step. For each agent
+Gaussian, computes cos(theta) and sin(theta)
+once, then updates both the real and imaginary
+curve items. Colour in both views is based on
+cos(theta) for consistent agent identity.
 
 ```
 function update(step_label):
@@ -712,33 +763,27 @@ function update(step_label):
     for each (cit_idx, citizen) in citizens:
         items = citizen_curves[cit_idx]
         for dim in 0 .. n_policy - 1:
+            # Compute both projections once.
+            cos_th = cos(pref.theta[dim].imag)
+            sin_th = sin(pref.theta[dim].imag)
             update_curve(items["pp", dim],
                 pref.mu[dim], pref.sigma[dim],
-                pref.theta[dim].imag, BLUE, 1)
-            update_curve(items["pa", dim],
-                aver.mu[dim], aver.sigma[dim],
-                aver.theta[dim].imag, BLUE, 1)
-            update_curve(items["ip", dim],
-                ideal.mu[dim], ideal.sigma[dim],
-                ideal.theta[dim].imag, GREEN, 1)
+                cos_th, cos_th, BLUE, 1)
+            update_curve(items["pp_i", dim],
+                pref.mu[dim], pref.sigma[dim],
+                sin_th, cos_th, BLUE, 1)
+            # Same dual-update for aver
+            # (pa / pa_i) and ideal (ip / ip_i).
         for dim in 0 .. n_trait - 1:
-            update_curve(items["tp", dim], ...)
-            update_curve(items["ta", dim], ...)
+            # Same dual-update for tp / tp_i,
+            # ta / ta_i.
 
     # --- Politicians (red) ---
-    for each (pol_idx, pol) in politicians:
-        items = politician_curves[pol_idx]
-        for dim in 0 .. n_policy - 1:
-            update_curve(items["pp", dim], ...)
-            update_curve(items["pa", dim], ...)
-        for dim in 0 .. n_trait - 1:
-            update_curve(items["tr", dim], ...)
+    # Same dual-update pattern for pp/pa
+    # (policy) and tr (trait), plus _i.
 
     # --- Government (black, policy only) ---
-    for dim in 0 .. n_policy - 1:
-        update_curve(government_curves[dim],
-            Pge.mu[dim], Pge.sigma[dim],
-            Pge.theta[dim].imag, BLACK, 2)
+    # Same dual-update pattern for ge / ge_i.
 
     # Record snapshot (§8.7), then flush display.
     record_frame(step_label)
@@ -929,10 +974,13 @@ function finalize():
 ### 8.9 Render Frame (Replay)
 
 Render a single recorded frame by reading the
-stored (mu, sigma, theta_imag) triples and calling
-`update_curve()` (§8.5) for each curve. The same
-rendering path as the live display ensures visual
-consistency between live and replayed output.
+stored (mu, sigma, theta_imag) triples, computing
+both projections, and calling `update_curve()`
+(§8.5) for each real and imaginary curve. The
+same rendering path as the live display ensures
+visual consistency between live and replayed
+output. Frame recording (§8.7) stores theta_imag,
+so both projections are recoverable.
 
 ```
 function render_frame(frame_index):
@@ -949,50 +997,24 @@ function render_frame(frame_index):
         for dim in 0 .. n_policy - 1:
             mu, sig, th =
                 snapshot["cit", idx, "pp", dim]
+            cos_th = cos(th)
+            sin_th = sin(th)
             update_curve(items["pp", dim],
-                mu, sig, th, BLUE, 1)
-            mu, sig, th =
-                snapshot["cit", idx, "pa", dim]
-            update_curve(items["pa", dim],
-                mu, sig, th, BLUE, 1)
-            mu, sig, th =
-                snapshot["cit", idx, "ip", dim]
-            update_curve(items["ip", dim],
-                mu, sig, th, GREEN, 1)
+                mu, sig, cos_th, cos_th, BLUE, 1)
+            update_curve(items["pp_i", dim],
+                mu, sig, sin_th, cos_th, BLUE, 1)
+            # Same dual-update for pa / pa_i,
+            # ip / ip_i.
         for dim in 0 .. n_trait - 1:
-            mu, sig, th =
-                snapshot["cit", idx, "tp", dim]
-            update_curve(items["tp", dim],
-                mu, sig, th, BLUE, 1)
-            mu, sig, th =
-                snapshot["cit", idx, "ta", dim]
-            update_curve(items["ta", dim],
-                mu, sig, th, BLUE, 1)
+            # Same dual-update for tp / tp_i,
+            # ta / ta_i.
 
     # --- Politicians (red) ---
-    for each (idx, _) in world.politicians:
-        items = politician_curves[idx]
-        for dim in 0 .. n_policy - 1:
-            mu, sig, th =
-                snapshot["pol", idx, "pp", dim]
-            update_curve(items["pp", dim],
-                mu, sig, th, RED, 1)
-            mu, sig, th =
-                snapshot["pol", idx, "pa", dim]
-            update_curve(items["pa", dim],
-                mu, sig, th, RED, 1)
-        for dim in 0 .. n_trait - 1:
-            mu, sig, th =
-                snapshot["pol", idx, "tr", dim]
-            update_curve(items["tr", dim],
-                mu, sig, th, RED, 1)
+    # Same dual-update pattern for pp/pa
+    # (policy) and tr (trait), plus _i.
 
     # --- Government (black, policy only) ---
-    for dim in 0 .. n_policy - 1:
-        mu, sig, th =
-            snapshot["gov", 0, "ge", dim]
-        update_curve(government_curves[dim],
-            mu, sig, th, BLACK, 2)
+    # Same dual-update pattern for ge / ge_i.
 
     app.processEvents()
 ```

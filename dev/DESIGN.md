@@ -88,18 +88,20 @@ cos_theta = cos(Im(theta))
 
 ### 4.2 Overlap Integral
 
-The key relationship between any two Gaussians G1 and G2 is
-their normalized overlap integral, which measures alignment
-on a bounded [-1, +1] scale:
+The key relationship between any two Gaussians G1 and G2
+is their normalized overlap integral, which measures
+alignment on a bounded [-1, +1] scale:
 
 ```
-I_norm(G1, G2) = I_raw(G1, G2) / sqrt(I(G1,G1) * I(G2,G2))
+I_norm(G1, G2) = I_raw(G1, G2)
+               / sqrt(I(G1,G1) * I(G2,G2))
 ```
 
-where the raw integral is:
+where the raw integral is the product integral of two
+unnormalized 1-D Gaussians:
 
 ```
-I_raw(G1, G2) = (pi / zeta)^1.5 * exp(-xi * d^2)
+I_raw(G1, G2) = (pi / zeta)^0.5 * exp(-xi * d^2)
                 * cos(theta_1) * cos(theta_2)
 ```
 
@@ -107,21 +109,32 @@ and:
 
 ```
 zeta = alpha_1 + alpha_2
-xi   = 1 / (2 * zeta)       = 0.5 / zeta
+xi   = alpha_1 * alpha_2 / zeta    (reduced exponent)
 d    = mu_1 - mu_2
 ```
 
+**Derivation**: for two Gaussians exp(-a1*(x-m1)^2) and
+exp(-a2*(x-m2)^2), completing the square in the product
+integral yields sqrt(pi/zeta) as the Gaussian integral
+factor and exp(-xi*d^2) as the separation penalty. The
+reduced exponent xi = a1*a2/(a1+a2) is analogous to the
+reduced mass in classical mechanics: it symmetrically
+weights both Gaussians' widths. When both sigmas are
+equal, xi simplifies to alpha/2.
+
 The normalization denominator factorizes across the two
-Gaussians, so each self-norm is cached per Gaussian object:
+Gaussians, so each self-norm is cached per Gaussian
+object:
 
 ```
-self_norm = sqrt(I(G,G)) = (pi * sigma^2)^0.75 * |cos(theta)|
+self_norm = sqrt(I(G,G)) = (pi * sigma^2)^0.25
+                           * |cos(theta)|
 ```
 
-This is recomputed in `update_integration_variables()` whenever
-sigma or theta change, and costs only one multiply and one
-divide per `integral()` call. Returns 0 when either agent is
-fully apathetic (cos_theta = 0).
+This is recomputed in `update_integration_variables()`
+whenever sigma or theta change, and costs only one
+multiply and one divide per `integral()` call. Returns 0
+when either agent is fully apathetic (cos_theta = 0).
 
 Properties of the integral:
 
@@ -1959,27 +1972,54 @@ closer to simulation speed.
 
 #### 2-D projected Gaussian encoding
 
-Each Gaussian is rendered as a 2-D curve in
-(x, y) space. The 1-D policy or trait axis maps
-to the x-axis. The bell curve amplitude is
-multiplied by cos(theta) to project the 3-D
-rotated Gaussian onto the real (engaged) plane:
+Each dimension has two subplots showing
+complementary projections of the same Gaussians.
+The 1-D policy or trait axis maps to the x-axis
+in both subplots.
+
+**Real (engaged) projection**: The bell curve
+amplitude is multiplied by cos(theta) to project
+onto the real (engaged) plane:
 
 ```
 x = linspace(mu - 4*sigma, mu + 4*sigma, N_pts)
 amplitude = exp(-(x - mu)^2 / (2 * sigma^2))
-y = amplitude * cos(theta)
+y_real = amplitude * cos(theta)
 ```
 
-**Colour saturation encoding**: The absolute value
-|cos(theta)| is mapped to colour saturation. At
-full engagement (|cos(theta)| = 1) the agent's
-base colour appears at maximum saturation. As
+**Imaginary (latent) projection**: The bell curve
+amplitude is multiplied by sin(theta) to show the
+latent (apathetic) component — the part of each
+Gaussian rotated out of the real plane:
+
+```
+y_imag = amplitude * sin(theta)
+```
+
+Since theta lies in [0, pi] for all Gaussians
+(§4.1), sin(theta) ≥ 0 always. Both preference
+and aversion curves project onto the positive
+half-plane — the preference/aversion sign
+separation exists only in the real projection
+via the sign of cos(theta). At the peak
+(x = mu), cos²(theta) + sin²(theta) = 1, so
+amplitude transferred out of the real projection
+appears in the imaginary projection and vice
+versa. Watching both views together reveals how
+engagement energy flows between the expressed
+and latent components.
+
+**Colour saturation encoding**: In both subplots
+the absolute value |cos(theta)| is mapped to
+colour saturation. At full engagement the agent's
+base colour appears at maximum saturation; as
 engagement drops the colour fades toward white.
 A minimum engagement floor (~15 %) ensures that
-even fully apathetic agents (cos(theta) = 0)
-leave a faint visible trace rather than vanishing
-into the white background.
+even fully apathetic agents leave a faint trace.
+Using the same engagement colour in both views
+means a given agent always appears in the same
+colour across the real and imaginary projections,
+maintaining visual agent identity.
 
 **Unit-peak normalization**: The standard Gaussian
 prefactor `1/(sigma * sqrt(2*pi))` is omitted.
@@ -1998,14 +2038,30 @@ through a combination of geometry and colour:
 | sigma     | Width of the bell curve         |
 | theta     | Projected height + saturation   |
 
+Both subplots share this mapping. In the real
+subplot the projection factor is cos(theta)
+(signed; preference above axis, aversion below).
+In the imaginary subplot it is sin(theta) (always
+non-negative; all curves above the axis).
+
 The sign convention (§4.1) produces correct visual
-geometry without special-casing: preference
-Gaussians (cos(theta) > 0) curve upward (+y),
-aversion Gaussians (cos(theta) < 0) curve downward
-(-y). As theta approaches pi/2 (apathy), the curve
-flattens toward the axis AND its colour fades —
-a double encoding that makes engagement level
+geometry in the real subplot without special-casing:
+preference Gaussians (cos(theta) > 0) curve upward
+(+y), aversion Gaussians (cos(theta) < 0) curve
+downward (-y). As theta approaches pi/2 (apathy),
+the curve flattens toward the axis AND its colour
+fades — a double encoding that makes engagement
 immediately obvious at a glance.
+
+In the imaginary subplot, the same Gaussians show
+the complementary view: as theta approaches pi/2,
+the sin(theta) curve rises toward 1.0 — growing
+in proportion to what the real projection loses.
+A fully apathetic agent (theta = pi/2) peaks at
+1.0 in the imaginary subplot and vanishes from the
+real subplot. A fully engaged agent (theta = 0 or
+pi) vanishes from the imaginary subplot and peaks
+at ±1.0 in the real subplot.
 
 #### Axis limits
 
@@ -2019,34 +2075,42 @@ drift during the simulation. Using fixed limits
 prevents the view from jumping between frames as
 agents move.
 
-The y-axis (projected amplitude) limits are fixed
-at [-1.1, 1.1]. With unit-peak normalization,
-fully engaged curves peak at +/-1.0; the 10%
-buffer prevents curve tips from touching the axis
-boundary. Preference curves occupy [0, 1] in y;
-aversion curves occupy [-1, 0] in y. A thin grey
-zero-line separates the two regions.
+Real subplots use y-limits [-1.1, 1.1] with a
+grey zero-line separating preferences (above)
+from aversions (below). Imaginary subplots use
+y-limits [0, 1.1] since sin(theta) ≥ 0 always;
+omitting the lower half doubles effective vertical
+resolution in the four-row layout. Both views
+include a 10% buffer beyond ±1.0.
 
 #### Subplot layout
 
-The window uses a two-row QGridLayout of pyqtgraph
-PlotWidgets:
+The window uses a four-row QGridLayout of
+pyqtgraph PlotWidgets. Each dimension has two
+subplots stacked vertically — the real projection
+on top, the imaginary directly below:
 
-- **Top row**: Policy dimensions (one PlotWidget
-  per policy dimension, left to right).
-- **Bottom row**: Trait dimensions (one PlotWidget
-  per trait dimension, left to right).
+- **Row 0**: Policy dimensions, real projection
+  (cos θ). One PlotWidget per policy dimension,
+  left to right.
+- **Row 1**: Policy dimensions, imaginary
+  projection (sin θ).
+- **Row 2**: Trait dimensions, real projection
+  (cos θ).
+- **Row 3**: Trait dimensions, imaginary
+  projection (sin θ).
 
 The number of columns is `max(num_policy_dims,
 num_trait_dims)`. If the counts differ, the
-shorter row leaves unused grid cells empty.
+shorter row pair leaves unused grid cells empty.
 
 Each subplot carries a descriptive title label
-(e.g., "Policy Dim 0") and axis labels: x-axis
-shows the policy or trait value, y-axis shows
-"Projected amplitude". The window title shows the
-current step label (e.g., "Campaign  Cycle 0
-Step 3" or "Govern  Cycle 1  Step 2").
+that includes the projection type (e.g.,
+"Policy Dim 0 (cos θ)" or "Trait Dim 1
+(sin θ)"). Axis labels: x-axis shows the policy
+or trait value, y-axis shows "Projected
+amplitude". The window title shows the current
+step label.
 
 #### Colour and style
 
@@ -2200,10 +2264,14 @@ thumb tracks the current frame position; programmatic slider
 updates must block the change signal to prevent a feedback
 loop that would immediately stop playback.
 
-**Frame label**: A QLabel displays the recorded step label and
-a frame counter (e.g., "Campaign  Cycle 0  Step 3 — Frame
-42 / 318"). This provides temporal context when the developer
-scrubs through recorded simulation history.
+**Frame label**: A QLabel displays the recorded step
+label and a frame counter (e.g., "(C) Cycle 0
+Step 3  [Frame 42 / 318]"). The simulation phase
+is abbreviated to a single letter in parentheses —
+(C) campaign, (G) govern, (P) primary campaign —
+so the label stays fixed-width across phase
+transitions and the scrubber slider does not
+resize.
 
 **Rendering**: Replay calls `_render_frame(index)`, which
 reads the stored triples for the requested frame and invokes

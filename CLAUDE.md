@@ -146,9 +146,12 @@ main() → for each cycle:
 - σ (sigma): spread/certainty — strength of attachment to that position
 - θ (theta): orientation/engagement — theta=0 fully engaged, theta=π/2 fully apathetic
 
-**Overlap Integral**: Measures alignment between two Gaussians
-- I(G1,G2) = (π/ζ)^1.5 × exp(-ξd²) × cos(θ1) × cos(θ2)
-- Values range -1 to +1
+**Overlap Integral**: Measures alignment between two
+  1-D Gaussians (normalized to [-1, +1])
+- I_raw = (π/ζ)^0.5 × exp(-ξd²) × cos(θ1) × cos(θ2)
+- ζ = α₁+α₂, ξ = α₁α₂/ζ (reduced exponent)
+- I_norm = I_raw / (self_norm₁ × self_norm₂)
+- self_norm = (πσ²)^0.25 × |cos(θ)|
 
 **Gaussian Notation**:
 - Pcp/Pca/Pci: Policy citizen preference/aversion/ideal
