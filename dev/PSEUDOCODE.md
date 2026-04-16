@@ -82,15 +82,15 @@ function campaign(sim, settings, world, hdf5, glyph,
 
         # 6. Accumulate politician influence.
         for each citizen in world:
-            citizen.accumulate_politician_influence()
+            citizen.build_response_to_politician_influence()
 
         # 7. Accumulate well-being engagement.
         for each citizen in world:
-            citizen.accumulate_well_being_response()
+            citizen.build_response_to_well_being()
 
         # 8. Accumulate citizen collective influence.
         for each citizen in world:
-            citizen.accumulate_collective_influence()
+            citizen.build_response_to_citizen_collective()
 
         # 9. Apply all accumulated shifts (single pass).
         for each citizen in world:
@@ -135,7 +135,7 @@ compute engagement shifts and trait-gated policy
 shifts.
 
 ```
-function accumulate_politician_influence(citizen):
+function build_response_to_politician_influence(citizen):
     for each politician in citizen.politician_list:
         f_pol   = politician.policy_persuasion
         f_trait = politician.trait_persuasion
@@ -196,7 +196,7 @@ defensive branch. Rate uses same-type trait overlaps
 only (always >= 0).
 
 ```
-function accumulate_collective_influence(citizen):
+function build_response_to_citizen_collective(citizen):
     cir = collective_influence_rate
 
     for each zone in citizen.zone_list:
@@ -261,7 +261,7 @@ and enacted policy (Pge). |well_being| drives
 engagement uniformly across all dimensions.
 
 ```
-function accumulate_well_being_response(citizen):
+function build_response_to_well_being(citizen):
     well_being = sum_n(I(Pci, Pge)[n])
     mag = |well_being|
 
@@ -1044,12 +1044,14 @@ if viz is not None:
     viz.finalize()
 
 # In campaign(), after apply_influence_shifts():
+# Phase letter is fixed-width (C/G/P) so the scrubber
+# width does not shift between phases (DESIGN §12.6).
 if viz is not None:
-    viz.update("Campaign  Cycle " + cycle
+    viz.update("(C) Cycle " + cycle
                + "  Step " + step)
 
 # In govern(), after Pge force application:
 if viz is not None:
-    viz.update("Govern  Cycle " + cycle
+    viz.update("(G) Cycle " + cycle
                + "  Step " + step)
 ```

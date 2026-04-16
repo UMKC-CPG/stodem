@@ -59,21 +59,6 @@ No pending items.
   coordinate space. Deferred until the geographic
   view is validated.
 
-- [x] **Debug viz — replay controls** (DESIGN §12.6,
-  PSEUDOCODE §8.7–8.9, CODE `policy_space_viz.py`).
-  Live display verified (2026-04-05). Frame
-  recording and post-run replay with transport
-  controls (play, pause, reverse, scrub, speed
-  adjust, keyboard shortcuts) implemented
-  (2026-04-05).
-
-- [x] **Debug viz — legend** (DESIGN §12.6, CODE
-  `policy_space_viz.py`). Colour/style legend added
-  to the top-left policy subplot with four reference
-  entries: blue (citizen pref/aver), green (ideal
-  policy), red (politician ext), black (government
-  enacted). Implemented (2026-04-05).
-
 - [ ] **Citizen-politician alignment glyph**
   (DESIGN §12.3, deferred). A composite glyph
   encoding the relationship between a citizen's
@@ -142,3 +127,5 @@ stable cross-references used throughout DESIGN.md.
 | 32 | `Pge.sigma` can go negative | `government.py`, `stodem.py` | `sigma_floor` applied after forces and spread |
 | 33 | `political_power` unscaled | `stodem.py` | Population-normalized |
 | 34 | Agreement/disagreement ratio unbounded | `politician.py` | Replaced with bounded `max(0, agreement + disagreement)` |
+| 35 | Debug viz — replay controls | `policy_space_viz.py` | Live display verified (2026-04-05); frame recording and post-run replay with transport controls (play, pause, reverse, scrub, speed adjust, keyboard shortcuts) implemented (2026-04-05) |
+| 36 | Debug viz — legend | `policy_space_viz.py` | Colour/style legend added to top-left policy subplot with four reference entries: blue (citizen pref/aver), green (ideal policy), red (politician ext), black (government enacted) (2026-04-05) |

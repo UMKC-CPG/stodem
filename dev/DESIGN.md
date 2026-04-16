@@ -285,8 +285,7 @@ each zone type (determined by that patch's location).
 twelve shift arrays accumulate changes to the citizen's
 Gaussians from all influence sources before application —
 one set of three (theta, mu, sigma) per Gaussian type
-(Pcp, Pca, Tcp, Tca). See §8.6.1. The current code uses
-only six arrays (TODO #23); these must be expanded.
+(Pcp, Pca, Tcp, Tca). See §8.6.1.
 
 ### 6.2 Politicians
 
@@ -312,8 +311,8 @@ their assigned zone.
   scales policy-overlap-driven engagement and position/
   spread shifts; `trait_persuasion` (f_trait) scales
   trait-overlap-driven engagement shifts. Initialized in
-  `Politician.reset_to_input()` from XML stddev params;
-  applied by TODO #21.
+  `Politician.reset_to_input()` from XML stddev params
+  and applied in `Citizen.build_response_to_politician_influence()`.
 - `policy_lie` / `trait_lie`: Propensity to misrepresent
   positions (not yet used).
 - `political_power`: Computed each govern phase from zone
@@ -439,16 +438,17 @@ time steps.
    zone average overlap integrals (§8.4, §8.6.2–
    §8.6.4).
 
-9. **Score candidates** — Each citizen computes a
-   weighted score for each politician using policy and
-   trait overlaps, weighted by `policy_trait_ratio`
-   (§10.1).
+9. **Apply influence shifts** — Accumulated shifts are
+   applied to each citizen's Gaussian parameters in a
+   single pass, followed by engagement decay and
+   derived variable updates (§8.6.5–§8.6.7). Must run
+   before candidate scoring so that the score reflects
+   the just-updated engagement state.
 
-10. **Apply influence shifts** — Accumulated shifts are
-    applied to each citizen's Gaussian parameters in a
-    single pass, followed by engagement decay and
-    derived variable updates (§8.6.5–§8.6.7). **Not
-    yet implemented** (TODO #8).
+10. **Score candidates** — Each citizen computes a
+    weighted score for each politician using policy
+    and trait overlaps, weighted by
+    `policy_trait_ratio` (§10.1).
 
 11. **Aggregate and output** — Patch-level well-being,
     per-Gaussian citizen statistics (mu, sigma,
@@ -921,8 +921,7 @@ mechanism. Politician influence on citizen traits is thus
 indirect and emergent.
 
 For detailed shift formulas, see §8.6.2 (engagement)
-and §8.6.3 (position/spread). Implementation status:
-TODO #19, #21.
+and §8.6.3 (position/spread).
 
 ### 8.4 Citizen-Driven Influence
 
@@ -943,7 +942,7 @@ following the same absolute-value rule as politician-driven
 engagement (§8.6.2).
 
 For detailed trait acclimatization formulas, see
-§8.6.4. Implementation status: TODO #20, #21.
+§8.6.4.
 
 ### 8.5 Well-Being, Resource, and Resentment
 
@@ -1047,11 +1046,8 @@ Tcp:  theta_shift[m],  mu_shift[m],  sigma_shift[m]
 Tca:  theta_shift[m],  mu_shift[m],  sigma_shift[m]
 ```
 
-All arrays are initialized to zero at the start of each step.
-The current code uses six arrays (three per domain);
-these must be expanded to twelve (TODO #23). The
-current accumulation code also has bugs that must be
-fixed first (TODO #19, #20).
+All arrays are initialized to zero at the start of each step
+by `Citizen.prepare_for_influence()`.
 
 #### 8.6.2 Engagement (Theta) Accumulation
 
@@ -1348,13 +1344,12 @@ would be needed: `damping` (velocity decay per step) and
 a mass function f(1/sigma, cos(theta)) with its own
 scaling parameters.
 
-#### 8.6.9 Open Design Questions
+#### 8.6.9 Resolved Design Questions
 
-The following questions must be resolved before the
-shift mechanics can be fully implemented (TODO #8,
-#21). The shift model choice (Q1) is settled; the
-remaining questions are refinements that can be
-resolved during or after initial implementation.
+Six design questions shaped the current shift
+mechanics. All are now resolved; the entries below
+are retained as a design-decision record so readers
+understand why each knob has its present form.
 
 ✅ **Q1 — Shift model choice**: The susceptibility
 model is chosen. Force/momentum dynamics are
