@@ -87,11 +87,11 @@ STODEM (Stochastic Democracy Simulation) is a multi-agent based simulation model
 # Set environment variable pointing to RC file directory
 export STODEM_RC=/path/to/stodem/.stodem
 
-# Run with defaults (reads stodem.in.xml, outputs stodem.hdf5/xdmf)
+# Run with defaults (reads stodem.in.toml, outputs stodem.hdf5/xdmf)
 python3 src/scripts/stodem.py
 
 # Run with custom input/output
-python3 src/scripts/stodem.py -i custom.xml -o output_prefix
+python3 src/scripts/stodem.py -i custom.toml -o output_prefix
 
 # Quick test
 cd jobs/quickTest && python3 ../../src/scripts/stodem.py
@@ -107,7 +107,8 @@ make && make install  # Installs to $STODEM_DIR/bin
 
 ## Dependencies
 
-- Python 3 with: `lxml`, `numpy`, `h5py`
+- Python 3.11+ with: `numpy`, `h5py`, `lxml` (TOML input
+  uses the stdlib `tomllib`; `lxml` is only for XDMF output)
 - CMake 3.1.0+ (for installation)
 - Optional: `pyqtgraph`, `PyQt5` (for `-d` debug viz only)
 - Optional: Fortran compiler (gfortran/ifort) for future expansion
@@ -119,7 +120,7 @@ The codebase has been refactored from a monolithic `stodem.py` into separate mod
 | Module | Contents |
 |---|---|
 | `stodem.py` | Entry point, design discussion comments, main simulation loop |
-| `settings.py` | `ScriptSettings` — XML + command line config, loads `$STODEM_RC/stodemrc.py` |
+| `settings.py` | `ScriptSettings` — TOML + command line config, loads `$STODEM_RC/stodemrc.py` |
 | `sim_control.py` | `SimControl`, `SimProperty` — simulation phases and data range computation |
 | `world.py` | `World` — main container; computes patch-level well-being, citizen Gaussian stats, and zone-upsampled politician stats via `compute_patch_well_being()`, `compute_patch_gaussian_stats()`, `compute_patch_politician_stats()` |
 | `diagnostics.py` | Diagnostic utilities for simulation debugging |
@@ -172,14 +173,15 @@ comments also in `stodem.py` (line 226+). Key principles:
 - **Scoring weights**: policy_trait_ratio (clamped to [-0.5, +0.5]) weights policy vs. trait in candidate scoring
 - **Vote probability**: P(vote) = mean(|cos(theta)|) across all stated Gaussians — engagement directly determines turnout
 
-## Configuration (stodem.in.xml)
+## Configuration (stodem.in.toml)
 
-Key sections:
-- `sim_control`: num_cycles, num_campaign_steps, num_govern_steps, data_resolution
-- `world`: patch_size, num_policy_dims, num_trait_dims, zone_type_N (hierarchy config)
-- `citizens`: policy/trait stddev parameters, policy_trait_ratio
-- `politicians`: policy/trait stddevs, influence/lie parameters, strategy probabilities
-- `government`: policy position/spread parameters
+TOML input; values arrive natively typed (ints, floats,
+booleans, lists). Key tables:
+- `[sim_control]`: num_cycles, num_campaign_steps, num_govern_steps, data_resolution
+- `[world]`: patch_size, num_policy_dims, num_trait_dims, num_zone_types; zone levels are `[[world.zone_type]]` array-of-tables entries (only the first num_zone_types are active; later ones are templates)
+- `[citizens]`: policy/trait stddev parameters, policy_trait_ratio
+- `[politicians]`: policy/trait stddevs, influence/lie parameters, strategy probability lists
+- `[government]`: policy position/spread parameters
 
 ## Output Files
 

@@ -101,7 +101,7 @@ class Citizen():
 
     def __init__(self, settings, patch, zones):
         """Initialize a citizen with random Gaussian
-        positions drawn from the XML configuration.
+        positions drawn from the TOML configuration.
 
         Each citizen receives:
           - 3 policy Gaussians per policy dimension
@@ -116,7 +116,7 @@ class Citizen():
         Parameters
         ----------
         settings : ScriptSettings
-            Provides XML configuration for Gaussian
+            Provides TOML configuration for Gaussian
             initialization parameters.
         patch : Patch
             The patch this citizen is placed on.
@@ -127,12 +127,9 @@ class Citizen():
         """
         # Get temporary local names for settings
         #   variables.
-        self.num_policy_dims = int(
-                settings.infile_dict[1][
-                    "world"]["num_policy_dims"])
-        self.num_trait_dims = int(
-                settings.infile_dict[1][
-                    "world"]["num_trait_dims"])
+        world_config = settings.infile_dict["world"]
+        self.num_policy_dims = world_config["num_policy_dims"]
+        self.num_trait_dims = world_config["num_trait_dims"]
 
         # Define the initial instance variables of this citizen.
 
@@ -150,7 +147,7 @@ class Citizen():
         #   The default means are 1 (preferences) and
         #   pi-1 (aversions), giving cos(1) ~ 0.54
         #   and cos(pi-1) ~ -0.54 respectively.
-        #   If the *_orien_stddev XML parameter is
+        #   If the *_orien_stddev TOML parameter is
         #   numeric, Im(theta) is drawn from a normal
         #   distribution with the default as the mean
         #   and the parameter as the stddev, clamped
@@ -158,16 +155,14 @@ class Citizen():
         #   Otherwise (e.g., "imaginary"), the default
         #   mean is used for all agents.
         half_pi = np.pi / 2.0
-        cit = settings.infile_dict[1]["citizens"]
+        cit = settings.infile_dict["citizens"]
 
         self.stated_policy_pref = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        cit["policy_pref_pos_stddev"]),
+                    scale=cit["policy_pref_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        cit["policy_pref_stddev_stddev"]),
+                    scale=cit["policy_pref_stddev_stddev"],
                     size=self.num_policy_dims)),
                 sample_theta(
                     cit["policy_pref_orien_stddev"],
@@ -177,12 +172,10 @@ class Citizen():
 
         self.stated_policy_aver = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        cit["policy_aver_pos_stddev"]),
+                    scale=cit["policy_aver_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        cit["policy_aver_stddev_stddev"]),
+                    scale=cit["policy_aver_stddev_stddev"],
                     size=self.num_policy_dims)),
                 sample_theta(
                     cit["policy_aver_orien_stddev"],
@@ -192,12 +185,10 @@ class Citizen():
 
         self.ideal_policy_pref = Gaussian(
                 [x + rng.normal(loc=0.0,
-                    scale=float(
-                        cit["ideal_policy_pref_pos_stddev"]))
+                    scale=cit["ideal_policy_pref_pos_stddev"])
                     for x in self.stated_policy_pref.mu],
                 np.abs(rng.normal(loc=0.0,
-                    scale=[float(
-                        cit["ideal_policy_pref_stddev_stddev"])
+                    scale=[cit["ideal_policy_pref_stddev_stddev"]
                         for x in range(
                             self.num_policy_dims)])),
                 sample_theta(
@@ -208,12 +199,10 @@ class Citizen():
 
         self.stated_trait_pref = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        cit["trait_pref_pos_stddev"]),
+                    scale=cit["trait_pref_pos_stddev"],
                     size=self.num_trait_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        cit["trait_pref_stddev_stddev"]),
+                    scale=cit["trait_pref_stddev_stddev"],
                     size=self.num_trait_dims)),
                 sample_theta(
                     cit["trait_pref_orien_stddev"],
@@ -223,12 +212,10 @@ class Citizen():
 
         self.stated_trait_aver = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        cit["trait_aver_pos_stddev"]),
+                    scale=cit["trait_aver_pos_stddev"],
                     size=self.num_trait_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        cit["trait_aver_stddev_stddev"]),
+                    scale=cit["trait_aver_stddev_stddev"],
                     size=self.num_trait_dims)),
                 sample_theta(
                     cit["trait_aver_orien_stddev"],
@@ -239,12 +226,11 @@ class Citizen():
         self.policy_consistency = self.policy_alignment()
 
         self.policy_trait_ratio = np.clip(rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["citizens"]
-                ["policy_trait_ratio_stddev"])), -0.5, 0.5)
+                scale=cit["policy_trait_ratio_stddev"]),
+                -0.5, 0.5)
 
-        self.collective_influence_rate = float(
-                settings.infile_dict[1]["citizens"]
-                ["collective_influence_rate"])
+        self.collective_influence_rate = (
+                cit["collective_influence_rate"])
 
         # sigma_floor is the minimum allowed value
         #   for any Gaussian's sigma (standard
@@ -262,9 +248,7 @@ class Citizen():
         #   their preference sigma toward sigma_floor,
         #   not toward zero. See the defensive branch
         #   in build_response_to_politician_influence().
-        self.sigma_floor = float(
-                settings.infile_dict[1]["citizens"]
-                ["sigma_floor"])
+        self.sigma_floor = cit["sigma_floor"]
 
         # engagement_decay_rate controls how quickly
         #   citizens drift back toward apathy each step
@@ -280,9 +264,8 @@ class Citizen():
         #   citizens, not just engage them once. Stored as
         #   an instance variable so it can be made dynamic
         #   in the future (e.g., driven by well-being).
-        self.engagement_decay_rate = float(
-                settings.infile_dict[1]["citizens"]
-                ["engagement_decay_rate"])
+        self.engagement_decay_rate = (
+                cit["engagement_decay_rate"])
 
         # defensive_ratio scales the targeted backlash response
         #   when a citizen dislikes a politician (negative trait
@@ -301,9 +284,7 @@ class Citizen():
         #   reaction; values < 1 dampen it. Stored as an instance
         #   variable for potential future dynamic modulation (e.g.,
         #   by well-being or accumulated resentment).
-        self.defensive_ratio = float(
-                settings.infile_dict[1]["citizens"]
-                ["defensive_ratio"])
+        self.defensive_ratio = cit["defensive_ratio"]
 
         # Initialize instance variables that do not come from the input file.
         self.current_patch = patch

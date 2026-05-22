@@ -71,7 +71,7 @@ Each Gaussian has three parameters:
 
   **Initial theta distribution**: Theta is currently
   hardcoded at initialization (1j for preferences,
-  (pi-1)j for aversions). The `*_orien_stddev` XML
+  (pi-1)j for aversions). The `*_orien_stddev` TOML
   parameters (e.g., `policy_pref_orien_stddev`) are
   reserved for a future extension in which the initial
   Im(theta) is drawn from a configurable distribution,
@@ -311,22 +311,22 @@ their assigned zone.
   scales policy-overlap-driven engagement and position/
   spread shifts; `trait_persuasion` (f_trait) scales
   trait-overlap-driven engagement shifts. Initialized in
-  `Politician.reset_to_input()` from XML stddev params
+  `Politician.reset_to_input()` from TOML stddev params
   and applied in `Citizen.build_response_to_politician_influence()`.
 - `policy_lie` / `trait_lie`: Propensity to misrepresent
   positions (not yet used).
 - `political_power`: Computed each govern phase from zone
   population, margin of victory, and agreement/disagreement
-  ratio (§7.5.1). Not initialized from XML.
+  ratio (§7.5.1). Not initialized from TOML.
 - `margin_of_victory`: Computed after each election as the
   normalized vote margin over the next-closest rival.
-  Not initialized from XML.
+  Not initialized from TOML.
 - `elected`: Whether this politician won the last election.
 - `votes`: Vote count (reset each cycle).
 
 **Strategies**: Each politician has three independently
 selected strategies, chosen probabilistically from cumulative
-distribution parameters in the input XML:
+distribution parameters in the input TOML:
 
 - `move_strategy`: How the politician moves between
   patches each campaign step.
@@ -363,7 +363,7 @@ A single `Government` instance holds:
 ```
 main()
   ScriptSettings()          Read RC file, parse command line
-  settings.read_input_file()  Parse stodem.in.xml
+  settings.read_input_file()  Parse stodem.in.toml
   SimControl(settings)      Extract phase counts
   World(settings, sim_control)
     Create patches (2D grid)
@@ -1069,7 +1069,7 @@ Tca.theta_shift[m] += f_trait * |I(Tca,Tpx)[m]|
 ```
 
 From zone averages (scaled by `collective_influence_rate`
-from the XML; no per-politician factor like f_pol/f_trait):
+from the TOML; no per-politician factor like f_pol/f_trait):
 
 ```
 Pcp.theta_shift[n] += |I(Pcp,avg_Pcp)[n]|
@@ -1329,7 +1329,7 @@ cos_theta = cos(theta)
 #### 8.6.8 New Parameters
 
 This section introduces simulation parameters not yet in the
-XML configuration:
+TOML configuration:
 
 | Parameter | Purpose | Initial |
 |---|---|---|
@@ -1372,7 +1372,7 @@ Narrowing rate remains coupled to susceptibility.
 independently scale community influence relative to
 politician influence. Default value is 1.0 (no
 change to current behavior). Configured in the
-`<citizens>` XML block.
+`[citizens]` TOML table.
 
 ✅ **Q5 — Trait self-gating rate**: Rate is determined
 by same-type overlaps only: `trait_rate =
@@ -1486,10 +1486,14 @@ politicians in that zone are marked as not elected.
 
 ---
 
-## 11. Configuration (stodem.in.xml)
+## 11. Configuration (stodem.in.toml)
 
-The XML input file defines all simulation parameters. Key
-sections:
+The TOML input file defines all simulation parameters.
+Each top-level section below is a TOML table (e.g.,
+`[sim_control]`). Values carry their native types —
+integers, floating-point numbers, booleans, and lists —
+so the program reads them directly without any string
+conversion. Key sections:
 
 ### sim_control
 
@@ -1508,8 +1512,8 @@ sections:
 | `patch_size` | Spatial extent of a patch (currently unused in movement) |
 | `num_policy_dims` | Number of abstract policy dimensions |
 | `num_trait_dims` | Number of abstract trait dimensions |
-| `num_zone_types` | Number of hierarchy levels |
-| `zone_type_N` | Per-type: name, sub-units, static flag, politician count distribution |
+| `num_zone_types` | Number of active hierarchy levels; only the first this-many `[[world.zone_type]]` entries are used |
+| `[[world.zone_type]]` | An array-of-tables entry per type: name, sub-units, `static` boolean, politician count distribution. Entries beyond `num_zone_types` act as inactive templates |
 
 ### citizens
 
@@ -1948,7 +1952,7 @@ conditionally imported behind a flag.
 
 A new flag `-d` / `--debug-viz` is added to the
 argument parser in `settings.py`. It is a boolean
-flag (store_true), defaulting to False. No XML
+flag (store_true), defaulting to False. No TOML
 configuration is needed — this is a developer tool,
 not a simulation parameter.
 

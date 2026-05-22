@@ -18,28 +18,29 @@ def sample_theta(orien_stddev_str, mean, size,
                                 aversion type)
 
     This function provides two initialization
-    modes, controlled by the XML configuration
+    modes, controlled by the configuration
     parameter *_orien_stddev:
 
-    1. NUMERIC string (e.g., "0.3"): draw each
+    1. NUMERIC value (e.g., 0.3): draw each
        agent's Im(theta) independently from a
        normal distribution N(mean, stddev), then
        clamp to [clamp_lo, clamp_hi]. This
        produces a population with varied initial
        engagement levels.
 
-    2. NON-NUMERIC string (e.g., "imaginary"):
+    2. KEYWORD string (e.g., "imaginary"):
        assign every agent the same Im(theta) =
        mean. The entire population starts with
        identical engagement.
 
     Parameters
     ----------
-    orien_stddev_str : str
-        The XML parameter value. If it can be
+    orien_stddev_str : float or str
+        The configuration value. If it can be
         parsed as a float, it becomes the stddev
-        for the normal draw. Otherwise, the
-        hardcoded mean is used for every element.
+        for the normal draw. Otherwise (a keyword
+        such as "imaginary"), the hardcoded mean
+        is used for every element.
     mean : float
         Default Im(theta) value. For preference
         Gaussians this is typically 1.0 (engaged);

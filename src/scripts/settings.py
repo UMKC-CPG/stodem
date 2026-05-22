@@ -1,9 +1,8 @@
 import argparse as ap
 import os
 import sys
+import tomllib
 from datetime import datetime
-
-from lxml import etree
 
 
 class ScriptSettings():
@@ -140,12 +139,15 @@ Defaults are given in $STODEM_RC/stodemrc.py.
 
 
     def read_input_file(self):
+        """Parse the TOML input file into a nested dictionary.
 
-        tree = etree.parse(self.infile)
-        root = tree.getroot()
+        The TOML format maps each top-level section (such as
+        sim_control, world, citizens) onto a dictionary whose
+        values already carry their native Python types: integers,
+        floating-point numbers, booleans, and lists. Because the
+        types are correct on arrival, the rest of the program can
+        index settings.infile_dict directly without any string
+        conversion."""
 
-        def recursive_dict(element):
-            return (element.tag,
-                    dict(map(recursive_dict, element)) or element.text)
-
-        self.infile_dict = recursive_dict(root)
+        with open(self.infile, "rb") as input_handle:
+            self.infile_dict = tomllib.load(input_handle)

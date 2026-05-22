@@ -19,15 +19,14 @@ class Zone():
         self.patches = [patch]
 
         # Get the statistical parameters for the number of politicians for
-        #   this zone.
-        self.min_politicians = int(settings.infile_dict[1]["world"]
-                [f"zone_type_{zone_type}"]["min_politicians"])
-        self.max_politicians = int(settings.infile_dict[1]["world"]
-                [f"zone_type_{zone_type}"]["max_politicians"])
-        self.num_politicians_mean = float(settings.infile_dict[1]["world"]
-                [f"zone_type_{zone_type}"]["num_politicians_mean"])
-        self.num_politicians_stddev = float(settings.infile_dict[1]["world"]
-                [f"zone_type_{zone_type}"]["num_politicians_stddev"])
+        #   this zone. The zone_type entries are an array of tables in the
+        #   TOML file, indexed by position, with native numeric types.
+        this_zone_type = (
+                settings.infile_dict["world"]["zone_type"][zone_type])
+        self.min_politicians = this_zone_type["min_politicians"]
+        self.max_politicians = this_zone_type["max_politicians"]
+        self.num_politicians_mean = this_zone_type["num_politicians_mean"]
+        self.num_politicians_stddev = this_zone_type["num_politicians_stddev"]
 
         # Determine the initial number of politicians for this zone.
         self.num_politicians = int(rng.normal(loc=self.num_politicians_mean,

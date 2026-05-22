@@ -13,7 +13,7 @@
 
 ```
 function main():
-    settings  = parse_config("stodem.in.xml")
+    settings  = parse_config("stodem.in.toml")
     sim       = SimControl(settings)
     world     = create_world(settings, sim)
     populate(world, settings)    # citizens, politicians, government

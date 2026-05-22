@@ -18,7 +18,7 @@ stodem/
   bin/                  Installed copies of Python modules
   build/release/        CMake build artifacts
   jobs/
-    quickTest/          Small test case (stodem.in.xml)
+    quickTest/          Small test case (stodem.in.toml)
     test1/              Larger test case
   src/
     scripts/            Primary source code (Module Map)
@@ -59,7 +59,8 @@ group.
 
 - `stodem.py` — Entry point. Contains `main()`, the
   simulation loop, `campaign()`, `vote()`, `govern()`.
-- `settings.py` (`ScriptSettings`) — XML input parsing,
+- `settings.py` (`ScriptSettings`) — TOML input parsing
+  (via the `tomllib` standard-library module),
   command-line argument handling, RC file loading.
 - `sim_control.py` (`SimControl`, `SimProperty`) —
   Simulation phase counts, total step computation, data
@@ -160,7 +161,10 @@ primary simulation is pure Python and does not require
 compilation.
 
 **Dependencies:**
-- Python 3 with: `numpy`, `h5py`, `lxml`
+- Python 3.11+ with: `numpy`, `h5py`, `lxml`. TOML input
+  is parsed with the standard-library `tomllib` module
+  (no extra package). `lxml` is now used only to build
+  the XDMF output metadata, not to read the input file.
 - CMake 3.1.0+ (for installation)
 - Optional: Fortran compiler (gfortran/ifort) for future
   expansion

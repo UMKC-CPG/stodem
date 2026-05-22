@@ -111,10 +111,10 @@ class Politician():
     def __init__(self, settings, zone_type, zone, patch):
 
         # Convert some settings variables to instance variables.
-        self.num_policy_dims = int(
-                settings.infile_dict[1]["world"]["num_policy_dims"])
-        self.num_trait_dims = int(
-                settings.infile_dict[1]["world"]["num_trait_dims"])
+        #   These TOML world values arrive as native integers.
+        world_config = settings.infile_dict["world"]
+        self.num_policy_dims = world_config["num_policy_dims"]
+        self.num_trait_dims = world_config["num_trait_dims"]
 
         # Define the initial instance variables of this politician obtained
         #   from the input file.
@@ -138,7 +138,7 @@ class Politician():
 
     def reset_to_input(self, settings):
         """(Re)initialize all Gaussians and scalar
-        attributes from the XML configuration.
+        attributes from the TOML configuration.
 
         Called once during __init__() and again at
         the start of each cycle for any politician
@@ -166,7 +166,7 @@ class Politician():
           (innate and external) are positive-valued;
           politicians have no trait aversions.
 
-          If the *_orien_stddev XML parameter is
+          If the *_orien_stddev TOML parameter is
           numeric, Im(theta) is drawn from a normal
           distribution centered on the default mean
           (1.0 for preferences, pi-1 for aversions),
@@ -177,16 +177,14 @@ class Politician():
           engagement.
         """
         half_pi = np.pi / 2.0
-        pol = settings.infile_dict[1]["politicians"]
+        pol = settings.infile_dict["politicians"]
 
         self.innate_policy_pref = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_pref_pos_stddev"]),
+                    scale=pol["policy_pref_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_pref_stddev_stddev"]),
+                    scale=pol["policy_pref_stddev_stddev"],
                     size=self.num_policy_dims)),
                 sample_theta(
                     pol["policy_pref_orien_stddev"],
@@ -195,12 +193,10 @@ class Politician():
                 1)
         self.innate_policy_aver = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_aver_pos_stddev"]),
+                    scale=pol["policy_aver_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_aver_stddev_stddev"]),
+                    scale=pol["policy_aver_stddev_stddev"],
                     size=self.num_policy_dims)),
                 sample_theta(
                     pol["policy_aver_orien_stddev"],
@@ -210,12 +206,10 @@ class Politician():
                 1)
         self.ext_policy_pref = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_pref_pos_stddev"]),
+                    scale=pol["policy_pref_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_pref_stddev_stddev"]),
+                    scale=pol["policy_pref_stddev_stddev"],
                     size=self.num_policy_dims)),
                 sample_theta(
                     pol["policy_pref_orien_stddev"],
@@ -224,12 +218,10 @@ class Politician():
                 1)
         self.ext_policy_aver = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_aver_pos_stddev"]),
+                    scale=pol["policy_aver_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        pol["policy_aver_stddev_stddev"]),
+                    scale=pol["policy_aver_stddev_stddev"],
                     size=self.num_policy_dims)),
                 sample_theta(
                     pol["policy_aver_orien_stddev"],
@@ -243,23 +235,19 @@ class Politician():
         #   theta uses the hardcoded default (1j).
         self.innate_trait = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        pol["trait_innate_pos_stddev"]),
+                    scale=pol["trait_innate_pos_stddev"],
                     size=self.num_trait_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        pol["trait_innate_stddev_stddev"]),
+                    scale=pol["trait_innate_stddev_stddev"],
                     size=self.num_trait_dims)),
                 np.full(self.num_trait_dims, 1j),
                 1)
         self.ext_trait = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        pol["trait_ext_pos_stddev"]),
+                    scale=pol["trait_ext_pos_stddev"],
                     size=self.num_trait_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        pol["trait_ext_stddev_stddev"]),
+                    scale=pol["trait_ext_stddev_stddev"],
                     size=self.num_trait_dims)),
                 np.full(self.num_trait_dims, 1j),
                 1)
@@ -276,18 +264,14 @@ class Politician():
         #   direction of effect (positive = amplifies shifts,
         #   negative = dampens).
         self.policy_persuasion = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["policy_persuasion_stddev"]))
+                scale=pol["policy_persuasion_stddev"])
         self.trait_persuasion = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["trait_persuasion_stddev"]))
+                scale=pol["trait_persuasion_stddev"])
 
         self.policy_lie = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["policy_lie_stddev"]))
+                scale=pol["policy_lie_stddev"])
         self.trait_lie = rng.normal(loc=0.0,
-                scale=float(settings.infile_dict[1]["politicians"]
-                ["trait_lie_stddev"]))
+                scale=pol["trait_lie_stddev"])
 
 
     def reset_votes(self):
@@ -459,12 +443,11 @@ class Politician():
     def select_strategy(self, settings, strat_type):
         """Randomly select a strategy index from a
         cumulative probability distribution defined
-        in the XML configuration.
+        in the TOML configuration.
 
-        The XML parameter cumul_{strat_type}_strategy_probs
-        contains a comma-separated list of cumulative
-        probabilities. For example, "0.5,0.75,1.0"
-        means:
+        The TOML parameter cumul_{strat_type}_strategy_probs
+        is a native list of cumulative probabilities.
+        For example, [0.5, 0.75, 1.0] means:
           - 50% chance of strategy 0  (U < 0.50)
           - 25% chance of strategy 1  (0.50 <= U < 0.75)
           - 25% chance of strategy 2  (0.75 <= U < 1.00)
@@ -477,11 +460,11 @@ class Politician():
         Parameters
         ----------
         settings : ScriptSettings
-            Provides the XML configuration.
+            Provides the TOML configuration.
         strat_type : str
             Either "move" or "adapt", selecting
             which set of cumulative probabilities
-            to use from the XML.
+            to use from the configuration.
 
         Returns
         -------
@@ -490,9 +473,11 @@ class Politician():
         """
         strategy_index = -1
         random_float = rng.uniform()
-        strategy_distribution = [float(prob) for prob in settings.infile_dict[1]
-                ["politicians"]
-                [f"cumul_{strat_type}_strategy_probs"].split(',')]
+        # The cumulative thresholds are stored as a native
+        #   list of floats in the TOML file, so they are read
+        #   directly with no string splitting or conversion.
+        strategy_distribution = (settings.infile_dict["politicians"]
+                [f"cumul_{strat_type}_strategy_probs"])
         for index in range(len(strategy_distribution)):
             if (random_float < strategy_distribution[index]):
                 strategy_index = index

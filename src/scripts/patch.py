@@ -14,8 +14,9 @@ class Patch():
         # Determine the properties of this patch.
 
         # Initialize the number of citizens on this patch.
-        self.num_citizens = int(
-                settings.infile_dict[1]["patch"]["initial_num_citizens"])
+        #   The TOML value is already an integer.
+        self.num_citizens = (
+                settings.infile_dict["patch"]["initial_num_citizens"])
 
         # Compute the set of zone index numbers for this patch. All patches of
         #   a given zone and zone type will have the same index number. Index

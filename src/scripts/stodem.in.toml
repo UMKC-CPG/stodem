@@ -1,0 +1,148 @@
+# STODEM simulation input configuration.
+#
+# This TOML file defines every parameter the simulation
+#   reads at startup. It replaces the older XML format:
+#   values now carry their native types (integers,
+#   floating-point numbers, booleans, and lists), so the
+#   code can use them directly without string conversion.
+#
+# Sections map one-to-one onto the program's major
+#   objects: simulation control, the geographic world,
+#   individual patches, citizens, politicians, and the
+#   government.
+
+# Top-level pacing of the simulation: how many election
+#   cycles to run and how many discrete steps make up each
+#   campaign and governing phase. data_resolution sets the
+#   grid sampling density for output; data_neglig is the
+#   negligible-amplitude cutoff used when sizing data
+#   ranges.
+[sim_control]
+num_cycles = 2
+num_campaign_steps = 3
+num_govern_steps = 5
+data_resolution = 10
+data_neglig = 0.01
+
+# The geographic world. patch_size is the linear size of
+#   one patch; num_policy_dims and num_trait_dims set the
+#   dimensionality of policy and trait space. num_zone_types
+#   selects how many of the [[world.zone_type]] tables below
+#   are active: only the first num_zone_types entries are
+#   read at runtime, so trailing entries serve as ready-made
+#   templates you can activate by raising the count.
+[world]
+patch_size = 3
+num_policy_dims = 3
+num_trait_dims = 3
+num_zone_types = 2
+
+# Zone types, listed from the finest level (district) up
+#   to the coarsest (country). Each is an array-of-tables
+#   entry. x_sub_units and y_sub_units give how many
+#   sub-units of the next-finer level tile this zone in
+#   each direction. static = false means the zone may
+#   redraw its boundaries; static = true freezes them.
+#   With num_zone_types = 2 above, the country entry is an
+#   inactive template until the count is raised to 3.
+[[world.zone_type]]
+name = "district"
+x_sub_units = 3
+y_sub_units = 3
+static = false
+min_politicians = 2
+max_politicians = 10
+num_politicians_mean = 2.3
+num_politicians_stddev = 1.0
+
+[[world.zone_type]]
+name = "state"
+x_sub_units = 3
+y_sub_units = 3
+static = true
+min_politicians = 2
+max_politicians = 10
+num_politicians_mean = 2.3
+num_politicians_stddev = 1.0
+
+[[world.zone_type]]
+name = "country"
+x_sub_units = 3
+y_sub_units = 3
+static = true
+min_politicians = 2
+max_politicians = 10
+num_politicians_mean = 2.3
+num_politicians_stddev = 1.0
+
+# How many citizens each patch starts with.
+[patch]
+initial_num_citizens = 3
+
+# Citizen initialization. The *_pos_stddev values set the
+#   spread of starting positions (mu); *_stddev_stddev set
+#   the spread of starting widths (sigma); *_orien_stddev
+#   names the distribution used to draw orientation
+#   (theta): "imaginary" leans toward apathy, "uniform"
+#   spreads engagement evenly, "real" leans toward full
+#   engagement. The remaining values tune the interaction
+#   physics (collective influence, the sigma floor,
+#   engagement decay, and defensive response).
+[citizens]
+policy_pref_pos_stddev = 2.0
+policy_pref_stddev_stddev = 2.0
+policy_pref_orien_stddev = "imaginary"
+policy_aver_pos_stddev = 2.0
+policy_aver_stddev_stddev = 2.0
+policy_aver_orien_stddev = "imaginary"
+ideal_policy_pref_pos_stddev = 2.0
+ideal_policy_pref_stddev_stddev = 0.01
+ideal_policy_pref_orien_stddev = "imaginary"
+trait_pref_pos_stddev = 2.0
+trait_pref_stddev_stddev = 2.0
+trait_pref_orien_stddev = "imaginary"
+trait_aver_pos_stddev = 2.0
+trait_aver_stddev_stddev = 2.0
+trait_aver_orien_stddev = "imaginary"
+policy_trait_ratio_stddev = 0.2
+collective_influence_rate = 1.0
+sigma_floor = 0.05
+engagement_decay_rate = 0.01
+defensive_ratio = 1.0
+
+# Politician initialization. Innate and external policy
+#   and trait positions are drawn with the given spreads.
+#   The persuasion and lie stddevs control how strongly a
+#   politician influences citizens and how far stated
+#   positions may diverge from innate ones. The cumulative
+#   strategy-probability lists are read as native arrays:
+#   each entry is a cumulative threshold used to pick a
+#   movement or adaptation strategy.
+[politicians]
+policy_pref_pos_stddev = 2.0
+policy_pref_stddev_stddev = 2.0
+policy_pref_orien_stddev = "uniform"
+policy_aver_pos_stddev = 2.0
+policy_aver_stddev_stddev = 2.0
+policy_aver_orien_stddev = "uniform"
+trait_innate_pos_stddev = 2.0
+trait_innate_stddev_stddev = 2.0
+trait_ext_pos_stddev = 2.0
+trait_ext_stddev_stddev = 2.0
+policy_persuasion_stddev = 1.0
+trait_persuasion_stddev = 1.0
+policy_lie_stddev = 2.0
+trait_lie_stddev = 2.0
+cumul_move_strategy_probs = [0.5, 0.75, 1.0]
+cumul_adapt_strategy_probs = [0.5, 0.75, 1.0]
+
+# The government's enacted policy. policy_pos_stddev and
+#   policy_stddev_stddev set the spread of the starting
+#   position and width; policy_orien names the starting
+#   orientation distribution; spread_rate controls how
+#   fast the enacted policy widens each governing step.
+[government]
+policy_pos_stddev = 2.0
+policy_stddev_stddev = 0.01
+policy_orien = "real"
+spread_rate = 0.01

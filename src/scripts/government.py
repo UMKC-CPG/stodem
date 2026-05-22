@@ -43,9 +43,11 @@ class Government():
     """
 
     def __init__(self, settings):
-        self.num_policy_dims = int(
-                settings.infile_dict[1][
-                    "world"]["num_policy_dims"])
+        # The TOML world and government sections provide
+        #   native numeric types, so values are read directly.
+        gov_config = settings.infile_dict["government"]
+        self.num_policy_dims = (
+                settings.infile_dict["world"]["num_policy_dims"])
 
         # Enacted policy Gaussians: one per policy
         #   dimension. These represent the current
@@ -73,16 +75,10 @@ class Government():
         #     in the govern phase.
         self.enacted_policy = Gaussian(
                 rng.normal(loc=0.0,
-                    scale=float(
-                        settings.infile_dict[1][
-                            "government"][
-                            "policy_pos_stddev"]),
+                    scale=gov_config["policy_pos_stddev"],
                     size=self.num_policy_dims),
                 np.abs(rng.normal(loc=0.0,
-                    scale=float(
-                        settings.infile_dict[1][
-                            "government"][
-                            "policy_stddev_stddev"]),
+                    scale=gov_config["policy_stddev_stddev"],
                     size=self.num_policy_dims)),
                 [1] * self.num_policy_dims, 1)
 
@@ -102,9 +98,7 @@ class Government():
         #   maintain than vague directives.
         #   Applied once per govern cycle (not per
         #   step) to prevent runaway broadening.
-        self.spread_rate = float(
-                settings.infile_dict[1][
-                    "government"]["spread_rate"])
+        self.spread_rate = gov_config["spread_rate"]
 
         # sigma_floor is the minimum allowed value
         #   for Pge.sigma. It prevents sigma from
@@ -113,6 +107,5 @@ class Government():
         #   This is the same floor used for citizen
         #   Gaussians — read from the citizens
         #   section of the input file.
-        self.sigma_floor = float(
-                settings.infile_dict[1][
-                    "citizens"]["sigma_floor"])
+        self.sigma_floor = (
+                settings.infile_dict["citizens"]["sigma_floor"])

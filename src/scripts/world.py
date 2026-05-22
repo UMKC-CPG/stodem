@@ -25,21 +25,17 @@ class World():
         self.policy_limits = []
         self.trait_limits = []
 
-        # Get the number of policy and trait dimensions.
-        self.num_policy_dims = int(
-                settings.infile_dict[1][
-                    "world"]["num_policy_dims"])
-        self.num_trait_dims = int(
-                settings.infile_dict[1][
-                    "world"]["num_trait_dims"])
+        # Get the number of policy and trait dimensions. The
+        #   TOML world section gives these as native integers.
+        world_config = settings.infile_dict["world"]
+        self.num_policy_dims = world_config["num_policy_dims"]
+        self.num_trait_dims = world_config["num_trait_dims"]
 
         # Get the patch size. (This is mostly just useless at the moment
         #   because the politicians and citizens will move *on the patch
         #   lattice* itself as opposed to occupying real valued space
         #   "within" a patch.)
-        self.patch_size = int(
-                settings.infile_dict[1][
-                    "world"]["patch_size"])
+        self.patch_size = world_config["patch_size"]
 
         # Create zone types. (This is a bit rigid now, but maybe it could
         #   be more flexible in the future. Zones are political zones that a
@@ -48,10 +44,10 @@ class World():
         #   their designated zone.) Zones must be contiguous and may or may
         #   not be static.
 
-        # Get the total number of zone types.
-        self.num_zone_types = int(
-                settings.infile_dict[1][
-                    "world"]["num_zone_types"])
+        # Get the total number of active zone types. Only the
+        #   first num_zone_types entries of the zone_type list
+        #   are used; any later entries are inactive templates.
+        self.num_zone_types = world_config["num_zone_types"]
 
         # For each zone type, store its initial properties (x,y dimensions
         #   and whether it is static or not). The crucial thing to understand
@@ -79,17 +75,16 @@ class World():
         # For example, zone type 2 is 3x3 because it is made of a 3x3 grid
         #   of zone type 1 subunits. (That is not a typo. This was the
         #   easiest way to define it.)
+        # The zone_type entries are an array of tables in the
+        #   TOML file, so x_sub_units and y_sub_units already
+        #   arrive as integers and static already arrives as a
+        #   boolean. We simply store the active entries by
+        #   reference; downstream code adds computed patch
+        #   counts onto these same dictionaries.
+        zone_type_configs = world_config["zone_type"]
         for zone_type in range(self.num_zone_types):
-            self.zone_types.append(settings.infile_dict[1]["world"]
-                    [f"zone_type_{zone_type}"])
-            self.zone_types[zone_type]["x_sub_units"] = \
-                    int(self.zone_types[zone_type]["x_sub_units"])
-            self.zone_types[zone_type]["y_sub_units"] = \
-                    int(self.zone_types[zone_type]["y_sub_units"])
-            if (self.zone_types[zone_type]["static"] == "0"):
-                self.zone_types[zone_type]["static"] = False
-            else:
-                self.zone_types[zone_type]["static"] = True
+            self.zone_types.append(
+                    zone_type_configs[zone_type])
 
         # Compute the initial number of patches in each dimension (x,y) for
         #   each zone type. With the understanding of the previous paragraph,

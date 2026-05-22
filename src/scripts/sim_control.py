@@ -17,26 +17,18 @@ class SimControl():
         # Initialize instance variables.
         self.curr_step = 0
 
-        # Extract simulation control parameters
-        #   from the xml input file.
-        self.num_cycles = int(
-                settings.infile_dict[1][
-                    "sim_control"]["num_cycles"])
-        self.num_campaign_steps = int(
-                settings.infile_dict[1][
-                    "sim_control"]["num_campaign_steps"])
-        self.num_govern_steps = int(
-                settings.infile_dict[1][
-                    "sim_control"]["num_govern_steps"])
+        # Extract simulation control parameters from the
+        #   TOML input file. Values arrive already typed
+        #   (integers and floats), so no conversion is needed.
+        sim = settings.infile_dict["sim_control"]
+        self.num_cycles = sim["num_cycles"]
+        self.num_campaign_steps = sim["num_campaign_steps"]
+        self.num_govern_steps = sim["num_govern_steps"]
 
         # Get the resolution and negligability limit
         #   of the data that may be output.
-        self.data_resolution = int(
-                settings.infile_dict[1][
-                    "sim_control"]["data_resolution"])
-        self.data_neglig = float(
-                settings.infile_dict[1][
-                    "sim_control"]["data_neglig"])
+        self.data_resolution = sim["data_resolution"]
+        self.data_neglig = sim["data_neglig"]
 
         # Compute the total number of simulation steps.
         self.total_num_steps = (
