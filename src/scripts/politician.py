@@ -258,15 +258,22 @@ class Politician():
         #   f_pol = policy_persuasion scales engagement and
         #   position/spread shifts driven by policy overlaps;
         #   f_trait = trait_persuasion scales engagement shifts
-        #   driven by trait overlaps. Both are drawn from
-        #   zero-mean Gaussians so that politicians vary in
-        #   how persuasive they are, with the sign encoding
-        #   direction of effect (positive = amplifies shifts,
-        #   negative = dampens).
-        self.policy_persuasion = rng.normal(loc=0.0,
-                scale=pol["policy_persuasion_stddev"])
-        self.trait_persuasion = rng.normal(loc=0.0,
-                scale=pol["trait_persuasion_stddev"])
+        #   driven by trait overlaps. Both are non-negative
+        #   magnitudes: politicians vary in HOW persuasive they
+        #   are, but persuasion only ever amplifies a shift, it
+        #   never reverses it. A negative factor would flip the
+        #   position shift into active repulsion (citizen moves
+        #   AWAY from the politician's policy), which is not a
+        #   behavior we model — demobilization and rigidity come
+        #   from trait misalignment (the trait_sum gate), not
+        #   from a politician's persuasiveness. The magnitude is
+        #   drawn as the absolute value of a zero-mean Gaussian
+        #   (a half-normal), so the stddev parameter still sets
+        #   the spread of persuasiveness across politicians.
+        self.policy_persuasion = np.abs(rng.normal(loc=0.0,
+                scale=pol["policy_persuasion_stddev"]))
+        self.trait_persuasion = np.abs(rng.normal(loc=0.0,
+                scale=pol["trait_persuasion_stddev"]))
 
         self.policy_lie = rng.normal(loc=0.0,
                 scale=pol["policy_lie_stddev"])
