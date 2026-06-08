@@ -77,19 +77,23 @@ group.
 - `zone.py` (`Zone`) — Geographic region at one hierarchy
   level. Maintains politician lists and citizen zone
   averages.
-- `patch.py` (`Patch`) — Basic grid unit. Knows its
-  (x,y) location, zone membership, and resident citizen
-  indices.
+- `patch.py` (`Patch`) — Basic discrete grid unit. Knows
+  its (x,y) grid location, zone membership, and resident
+  citizen indices. A patch also has a continuous extent
+  (`patch_size`) within which agents are intended to hold
+  real-valued positions (planned; see DESIGN §5.1).
 
 **Agents**
 
 - `citizen.py` (`Citizen`) — Agent with Gaussian
   policy/trait preferences, aversions, and ideal
   positions. Computes overlap integrals, influence
-  response, and voting logic.
+  response, and voting logic. Will carry a continuous
+  intra-patch (x,y) position (planned; see DESIGN §5.1).
 - `politician.py` (`Politician`) — Agent with innate and
   external policy/trait positions. Strategies for
-  movement, adaptation, and campaigning.
+  movement, adaptation, and campaigning. Will also carry
+  a continuous intra-patch (x,y) position (planned).
 - `government.py` (`Government`) — Holds enacted policy
   Gaussians that affect citizen well-being.
 
