@@ -63,11 +63,22 @@ be consistent with them.
    personally agreeable; alienated citizens become more
    rigid. This creates rich emergent dynamics.
 
-4. **Symmetric engagement from asymmetric alignment.**
-   Both agreement and disagreement increase engagement.
-   Only indifference (weak overlap) leaves engagement
-   unchanged. This prevents the modeling pitfall where
-   only positive interactions create participation.
+4. **Engagement from alignment and stakes.** Both
+   agreement and disagreement with other agents increase
+   engagement; only mutual indifference (weak overlap)
+   leaves it unchanged. This prevents the modeling
+   pitfall where only positive interactions create
+   participation. The response is deliberately not
+   symmetric: a threat — anything touching an aversion —
+   mobilizes harder than mere agreement. Engagement can
+   also fall, not only rise: when the government
+   persistently ignores a citizen's conscious
+   preferences, that unmet stake breeds resignation and
+   the citizen disengages while keeping their opinion
+   intact. Engagement is thus driven both up (interest,
+   threat, anger) and down (resignation), with a steady
+   background fade toward apathy in the absence of
+   stimulation.
 
 5. **Separation of ideal and stated preferences.** The
    gap between what citizens believe and what actually
@@ -77,3 +88,12 @@ be consistent with them.
    all sources is accumulated into shift arrays before
    being applied. This prevents order-of-evaluation
    artifacts.
+
+7. **Discrete patches, continuous interiors.** Space is
+   a grid of discrete patches; movement *between* patches
+   is discrete, cell to cell. *Within* a patch, agents —
+   both citizens and politicians — occupy continuous,
+   real-valued positions and move freely, in the spirit
+   of NetLogo turtles. Zone membership and neighbor
+   grouping are defined at the discrete patch level;
+   fine-grained position within a patch is continuous.

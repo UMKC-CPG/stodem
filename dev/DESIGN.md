@@ -172,8 +172,24 @@ convention uses a three-letter code:
 ### 5.1 Spatial Organization
 
 The world is a two-dimensional grid of **patches**. Patches are
-the atomic spatial unit. Each patch knows its (x,y) grid
-coordinates and which zones it belongs to at every hierarchy level.
+the atomic *discrete* spatial unit: an agent is always "on" exactly
+one patch, and patch-to-patch movement is discrete (cell to cell).
+Each patch knows its (x,y) grid coordinates and which zones it
+belongs to at every hierarchy level.
+
+Within a single patch, however, space is *continuous*. Each patch
+spans a real-valued square of side `patch_size`, and every agent
+(citizen and politician) carries a continuous (x,y) position inside
+its current patch — NetLogo-turtle style (VISION Principle 7). This
+gives agents fine-grained freedom of position while keeping zone
+membership and neighbor grouping defined at the discrete patch
+level.
+
+> **Status:** the continuous intra-patch position is specified here
+> but not yet implemented. Today agents store only a patch
+> assignment — there is no intra-patch coordinate on `Citizen` or
+> `Politician` — and `patch_size` is read from configuration but
+> otherwise unused. See TODO (CODE level).
 
 ### 5.2 Zone Hierarchy
 
@@ -767,11 +783,13 @@ Once `Pge` shifts, existing mechanisms produce
 feedback:
 
 1. `overlap(Pci, Pge)` changes — citizen well-being
-   changes.
-2. `overlap(Pcp, Pge)` changes — perceived
-   satisfaction changes.
-3. Well-being feeds into engagement (via
-   `build_response_to_well_being()`).
+   (the objective outcome measure) changes.
+2. `overlap(Pcp, Pge)` and `overlap(Pca, Pge)` change —
+   perceived satisfaction and felt threat change.
+3. Those conscious overlaps feed engagement as
+   resignation (unmet preference, down) and anger
+   (enacted aversion, up); see §8.6.2. Well-being itself
+   (the ideal overlap) no longer feeds engagement.
 4. Engagement affects vote probability.
 5. Vote probability affects who wins next cycle.
 
@@ -810,6 +828,163 @@ without special-casing them:
 ---
 
 ## 8. Interaction Physics
+
+### 8.0 Interaction Summary
+
+This section is a descriptive map of every agent-to-agent
+interaction as currently implemented in the code. It
+precedes the detailed prose of §8.1 onward and is meant as
+a quick reference; the subsections that follow give the
+mathematics. Nothing here introduces new physics.
+
+⚠️ **Engagement rows show the SUPERSEDED pre-redesign
+model.** The engagement-related entries below (rows 1 and
+4–6, the self→citizen decay cell, and the saturation note
+under "structural properties") describe the old engagement
+model: a one-way upward ratchet plus a proportional decay
+that froze at full engagement. The engagement redesign —
+a threat-weighted, definedness-gated push, government-
+driven anger and resignation, and a spread-proportional
+fade, all running every step in both phases — is now
+implemented in the code and specified in §8.2, §8.6.2,
+§8.6.5, and §8.6.6, which are authoritative. These matrix
+rows are retained only until the master matrix is
+refreshed (TODO, DESIGN level); read the cited sections
+for the current behavior.
+
+One framing fact first: **only citizens and the government
+evolve continuously.** A politician's *innate* (true)
+positions are drawn once and never drift — election winners
+keep them, losers are replaced by fresh-random challengers
+each cycle (`reset_to_input`). Politicians only recompute
+their *apparent* (external) positions each campaign step,
+from scratch, off their fixed innate ones. So "politician
+position evolution" is fixed-or-replaced, not gradual.
+
+#### Master interaction matrix (source → target)
+
+```
+┌──────────────┬─────────────────────────┬──────────────────────┬──────────────────────────┐
+│ Source ↓ \   │ Citizen                 │ Politician           │ Government               │
+│   Target →   │                         │                      │                          │
+├──────────────┼─────────────────────────┼──────────────────────┼──────────────────────────┤
+│ Citizen      │ community drift (policy │ elects them; sets    │ — (only by electing      │
+│              │ + trait pos/σ,          │ margin (vote)        │ politicians)             │
+│              │ engagement) via zone    │                      │                          │
+│              │ average                 │                      │                          │
+├──────────────┼─────────────────────────┼──────────────────────┼──────────────────────────┤
+│ Politician   │ engagement + policy     │ —                    │ pushes Pge mu/σ toward   │
+│              │ pos/σ (trait gates, but │                      │ own pref, away from own  │
+│              │ never moves citizen     │                      │ aver (if elected)        │
+│              │ trait positions)        │                      │                          │
+├──────────────┼─────────────────────────┼──────────────────────┼──────────────────────────┤
+│ Government   │ sets well-being →       │ —                    │ natural spread (self, σ  │
+│              │ engagement only (never  │                      │ only)                    │
+│              │ moves citizen           │                      │                          │
+│              │ positions)              │                      │                          │
+├──────────────┼─────────────────────────┼──────────────────────┼──────────────────────────┤
+│ (self)       │ engagement decay →      │ apparent-position    │ —                        │
+│              │ apathy                  │ adapt; patch move    │                          │
+└──────────────┴─────────────────────────┴──────────────────────┴──────────────────────────┘
+```
+
+#### Detailed interactions and expected effects
+
+```
+┌────┬───────────────────────────┬───────────────────────────┬───────────────────────────┬──────────────────────────┐
+│ #  │ Interaction (phase)       │ Channel / trigger         │ Expected effect           │ Direction model          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 1  │ Politician → Citizen      │ |overlap| of citizen      │ Any contact (agree or     │ additive to θ            │
+│    │ engagement (campaign)     │ Pcp/Pca/Tcp/Tca with      │ disagree) raises          │                          │
+│    │                           │ politician ext Gaussians, │ engagement; persuasion    │                          │
+│    │                           │ × persuasion              │ only amplifies, never     │                          │
+│    │                           │ f_pol/f_trait (>= 0)      │ reduces it                │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 2  │ Politician → Citizen      │ trait affinity gates;     │ Pcp→politician's apparent │ sign-only step ×         │
+│    │ policy (attraction)       │ magnitude |trait_sum|     │ pref, Pca→its aver.       │ susceptibility           │
+│    │ (campaign, trait_sum ≥ 0) │                           │ Citizen adopts agreeable  │ S=σ(1−|cosθ|)            │
+│    │                           │                           │ politician's stance       │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 3  │ Politician → Citizen      │ trait aversion gates      │ Pcp σ narrows (digs in /  │ sign-only × S ×          │
+│    │ policy (defensive)        │                           │ rigid); Pca.mu →          │ defensive_ratio          │
+│    │ (campaign, trait_sum < 0) │                           │ politician's preference   │                          │
+│    │                           │                           │ (targeted backlash).      │                          │
+│    │                           │                           │ Pcp.mu & Pca.σ unchanged  │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 4  │ Community → Citizen       │ overlap with zone-average │ Drift toward community    │ sign-only × S ×          │
+│    │ (campaign)                │ citizen Gaussians, ×      │ norms — policy AND trait  │ trait_rate ≥ 0.          │
+│    │                           │ collective_influence_rate │ pos/σ; the only channel   │ Self-canceling with 1    │
+│    │                           │                           │ that moves citizen trait  │ citizen                  │
+│    │                           │                           │ positions. Unconditional  │                          │
+│    │                           │                           │ (no defensive branch)     │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 5  │ Government → Citizen      │ well_being = Σ I(Pci,     │ |well_being| raises       │ additive to θ            │
+│    │ well-being (campaign)     │ Pge) — ideal vs enacted   │ engagement on all issues  │                          │
+│    │                           │ (not stated)              │ uniformly. Citizens       │                          │
+│    │                           │                           │ cannot change own         │                          │
+│    │                           │                           │ well-being by shifting    │                          │
+│    │                           │                           │ stated views — only Pge   │                          │
+│    │                           │                           │ moves it                  │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 6  │ Engagement decay          │ α *= (1+                  │ Drift back to apathy;     │ multiplicative           │
+│    │ (campaign, self)          │ engagement_decay_rate)    │ full engagement (α=0)     │                          │
+│    │                           │                           │ never decays; larger      │                          │
+│    │                           │                           │ disengagement decays      │                          │
+│    │                           │                           │ faster (accelerating)     │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 7  │ Citizen → Politician      │ score = (0.5+ptr)·        │ Highest-scoring           │ argmax + ratio           │
+│    │ (vote)                    │ policy_sum + (0.5−ptr)·   │ politician per zone wins; │                          │
+│    │                           │ trait_sum; turnout =      │ sets margin_of_victory;   │                          │
+│    │                           │ mean(|cosθ|)              │ engagement → turnout      │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 8  │ Citizen community →       │ ext = innate + lie·       │ Pander toward citizen     │ linear interp, lie can   │
+│    │ Politician apparent       │ (zone_citizen_avg −       │ prefs (strat 1) / avoid   │ be ±                     │
+│    │ (campaign)                │ innate)                   │ citizen avers (strat 2);  │                          │
+│    │                           │                           │ honest (strat 0) =        │                          │
+│    │                           │                           │ innate. Recomputed fresh  │                          │
+│    │                           │                           │ each step                 │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 9  │ Politician → Government   │ sign forces ×             │ Pge.mu/σ pulled toward    │ sign-only step           │
+│    │ (govern, elected only)    │ political_power (= pop·   │ winner's innate pref,     │                          │
+│    │                           │ margin·mandate) × per-dim │ pushed from its aver      │                          │
+│    │                           │ 1/σ weight                │                           │                          │
+├────┼───────────────────────────┼───────────────────────────┼───────────────────────────┼──────────────────────────┤
+│ 10 │ Government natural spread │ Pge.σ += spread_rate/σ    │ σ broadens (narrow        │ additive                 │
+│    │ (govern, self, 1×/cycle)  │                           │ policies spread faster);  │                          │
+│    │                           │                           │ always positive,          │                          │
+│    │                           │                           │ unopposed                 │                          │
+└────┴───────────────────────────┴───────────────────────────┴───────────────────────────┴──────────────────────────┘
+```
+
+#### Macro feedback loop
+
+```
+citizens vote → elect politicians → (govern) push Pge toward
+  winners' prefs → Pge sets citizen well-being (via fixed
+  ideal Pci) → well-being sets engagement → engagement sets
+  turnout → affects next election
+```
+
+Citizen *stated* positions drive **voting** and **politician
+pandering**; citizen *ideal* positions (never influenced)
+drive **well-being**. The gap between the two is the
+system's central object of study (VISION Principle 5).
+
+#### Structural properties to watch
+
+These follow directly from the table and bear on whether
+agent behaviors converge, diverge, or flatline:
+
+- **Every position force is sign-only** (rows 2, 3, 4, 9):
+  fixed-size steps with no distance term, so there is no
+  proportional restoring force anywhere — balanced forces
+  freeze, unbalanced forces march at constant speed.
+- **σ has a floor but no ceiling** (rows 2–4, 9, 10), and
+  the government natural spread (row 10) is unopposed, so
+  `Pge.σ` grows without bound.
+- **Engagement has several additive gain sources** (rows 1,
+  4, 5) **against one weak multiplicative decay** (row 6),
+  which tends toward saturation at full engagement.
 
 ### 8.1 Fundamental Principle: Trait Gates Policy
 
@@ -863,28 +1038,66 @@ engagement effects, see §8.6.2.
 
 ### 8.2 Engagement Dynamics
 
-**Engagement from overlap integrals**: Both agreement and
-disagreement increase engagement. The |absolute value| of
-each overlap integral shifts the corresponding citizen
-Gaussian's theta toward real (toward theta=0, more engaged).
-A politician who advocates for a policy you have a strong
-aversion to will make you engage to fight against them, just
-as a politician who aligns with your preferences will make
-you engage in support.
+Engagement is the angle theta of each citizen Gaussian:
+near the engaged pole the citizen cares about that issue;
+near pi/2 the citizen is apathetic. Every simulation step,
+in BOTH the campaign and the governing phase, engagement
+moves up or down under three forces.
 
-**Engagement decay**: Every simulation step, every citizen's
-theta for every Gaussian drifts toward pi/2 (fully imaginary /
-fully apathetic) proportionally to theta itself:
-`theta *= (1 + engagement_decay_rate)`. The more disengaged a
-citizen already is, the faster they drift toward full apathy —
-disengagement is self-reinforcing. A perfectly engaged citizen
-(theta=0) experiences no decay. Without active campaigning or
-citizen-citizen interaction, citizens gradually disengage from
-all issues. The rate is stored as a variable for future dynamic
-behavior.
+**Engagement rises with stakes (the upward push)**. Both
+agreement and disagreement raise engagement: the magnitude
+of each overlap integral shifts the matching citizen
+Gaussian toward the engaged pole. A politician who pushes a
+policy you are strongly averse to mobilizes you to fight,
+exactly as one who matches your preference mobilizes you to
+support. Two refinements shape this push:
 
-For the precise decay formula, see §8.6.6. For the
-new parameter, see §8.6.8.
+- *Threat counts double.* Any engagement term that
+  involves an aversion — the citizen's or the other
+  side's — is multiplied by `threat_weight` (about 2).
+  Plain preference-meets-preference agreement counts at
+  ordinary strength. A shared enemy, or a direct threat,
+  mobilizes harder than shared enthusiasm. See §8.6.2.
+- *Definedness gates the push.* The push is scaled by how
+  sharply the citizen holds the view, measured as
+  `sigma_floor / sigma` (near 1 for a sharp view, near 0
+  for a vague one). A citizen with no firm position is
+  hard to rouse; a citizen with a sharp one is easily
+  roused. See §8.6.2.
+
+**Engagement responds to the government (anger and
+resignation)**. The enacted policy drives engagement
+through the citizen's *conscious* (stated) positions,
+every step in both phases. Having the thing you
+consciously oppose enacted raises engagement (anger, a
+mobilizing response); having what you consciously want go
+unmet lowers it (resignation, a withdrawing response).
+This replaces the older "absolute well-being raises
+engagement" rule, which could only ever mobilize and never
+let anyone give up. The objective well-being measure
+(§8.5) is unchanged but no longer feeds engagement. See
+§8.6.2.
+
+**Engagement fades toward apathy (the downward pull)**.
+Every step, in both phases, engagement fades toward apathy
+by an amount proportional to the citizen Gaussian's own
+spread: `fade = engagement_decay_rate * sigma`. Because
+sigma is floored, everyone fades a little every step, so
+no citizen freezes at full engagement. A sharp view (small
+sigma) fades slowly and so holds engagement; a broad,
+unsettled view fades quickly and lapses to apathy. The
+fade does not depend on the current engagement level, so
+it makes no claim that the most engaged disengage fastest:
+its size depends only on how firmly the view is held. See
+§8.6.6.
+
+Together these make the firmness of a view (its spread)
+the single driver of how durable engagement is, and they
+leave a stable fraction of vague, unsettled citizens
+resting near apathy without any per-citizen tuning.
+
+For the push formulas, see §8.6.2. For the fade, see
+§8.6.6. For the new parameters, see §8.6.8.
 
 ### 8.3 Politician-Driven Influence
 
@@ -952,7 +1165,16 @@ thinking:
 **Perceived satisfaction** (relatively settled): Direct overlap
 between stated policy preferences and enacted policy:
 overlap(Pcp, Pge). Represents how satisfied the citizen *feels*,
-regardless of whether the policy actually benefits them.
+regardless of whether the policy actually benefits them. This
+conscious overlap, together with its aversion counterpart
+overlap(Pca, Pge), is now the channel by which the government
+drives engagement — resignation when a stated preference goes
+unmet, anger when a stated aversion is enacted (§8.6.2). The
+older path, in which the objective ideal-vs-enacted overlap
+overlap(Pci, Pge) drove engagement through its absolute value,
+is retired: the ideal overlap remains the simulation's
+*outcome measure* of well-being but no longer feeds engagement,
+because citizens cannot perceive their hidden ideal.
 
 **Resource** (candidate concept): An abstract economic stock per
 citizen that accumulates based on alignment between ideal policy
@@ -1011,26 +1233,52 @@ implementation, the following decisions are needed:
    intensity, trait shifts)?
 
 4. **Implementation order**: ✅ **Decided**: Implement
-   the simple `overlap(Pci, Pge)` well-being first with
-   downstream engagement effects. Encapsulate the
-   well-being→engagement mapping so the richer model
-   can slot in without restructuring call sites.
-   (See §6.1 and TODO #9.)
+   the simple `overlap(Pci, Pge)` well-being first as the
+   objective outcome measure. **Updated**: the
+   government→engagement coupling no longer runs through
+   that ideal overlap; it runs through the conscious
+   `overlap(Pcp, Pge)` and `overlap(Pca, Pge)` as anger
+   and resignation (§8.6.2). The richer well-being model
+   can still slot in behind the outcome measure without
+   restructuring call sites. (See §6.1 and TODO #9.)
 
 ### 8.6 Influence Application
 
-Each campaign step proceeds in two phases: accumulation and
-application. During accumulation, all influence sources
-(politicians, citizen collective, well-being response) compute
-their contributions and add them to per-citizen shift arrays.
-During application, the accumulated shifts modify the citizen's
-Gaussian parameters in a single pass. This two-phase pattern
+Each step proceeds in two passes: accumulation and
+application. During accumulation, all active influence sources
+compute their contributions and add them to per-citizen shift
+arrays. During application, the accumulated shifts modify the
+citizen's Gaussian parameters in a single pass. This pattern
 prevents order-of-evaluation artifacts: the sequence in which
 influence sources are processed does not affect the outcome.
 
+**Engagement evolves every step, in both phases.** The
+government anger/resignation push (§8.6.2) and the spread-
+proportional fade (§8.6.6) run on every step of BOTH the
+campaign and the governing phase, so a citizen's engagement
+is a single continuous process with a consistent per-step
+cadence. The phases differ only in which *other* sources are
+present: the politician and citizen-collective pushes act
+during the campaign phase, and are simply absent during
+governing. Position and spread shifts during campaign still
+follow the trait-gated rules of §8.6.3–§8.6.4.
+
 Ideal policy preferences (Pci) are never subject to influence
-shifts or engagement decay. They represent the citizen's true
-(unknown) interest and remain static throughout the simulation.
+shifts or the engagement fade. They represent the citizen's
+true (unknown) interest and remain static throughout the
+simulation.
+
+**Deferred idea — community influence during governing**
+(noted 2026-06-07; to be tackled after the engagement work).
+At present the citizen-collective overlaps move citizen
+policy preferences and aversions only during the campaign
+phase. A natural extension is to let those community overlaps
+keep acting through the governing phase as well, so that
+citizens continue to drift toward their neighbors' positions
+between elections, not only during campaigns. This is a
+position-dynamics change (it touches §8.6.3–§8.6.4 and the
+phase structure), separate from the engagement redesign
+captured here, and is left for a later pass.
 
 #### 8.6.1 Shift Array Structure
 
@@ -1049,38 +1297,112 @@ Tca:  theta_shift[m],  mu_shift[m],  sigma_shift[m]
 All arrays are initialized to zero at the start of each step
 by `Citizen.prepare_for_influence()`.
 
+The mu and sigma shifts additionally split by influence
+source — a politician sub-total and a community sub-total —
+because the no-overshoot span clamp (§8.6.3) is applied to
+each source against its own target span before the two are
+summed. The theta (engagement) shifts need no such split;
+they are not clamped and accumulate into a single array per
+Gaussian as shown above. Alongside each position/spread
+sub-total the citizen tracks, per parameter and dimension,
+the lowest and highest target contributed by that source,
+which the clamp reads at the application step (§8.6.5).
+
 #### 8.6.2 Engagement (Theta) Accumulation
 
-Each |overlap integral| contributes to the theta shift of the
-citizen Gaussian it involves. All contributions are
-non-negative — both agreement and disagreement drive
-engagement.
+Each overlap magnitude contributes to the theta shift of
+the citizen Gaussian it involves, driving that Gaussian
+toward its engaged pole. Two weights modulate every
+contribution:
 
-From each politician p (f_pol = policy_persuasion,
-f_trait = trait_persuasion):
+- **Threat weight w.** Any term that involves an aversion
+  Gaussian — the citizen's or the other side's — is
+  multiplied by `threat_weight` (w, about 2). Only a
+  preference-meets-preference term counts at weight 1.
+  (See §8.2: shared opposition and direct threat mobilize
+  harder than shared enthusiasm.)
+- **Definedness d.** Every contribution is scaled by the
+  definedness of the citizen Gaussian being shifted,
+  d = min(1, sigma_floor / sigma) (near 1 for a sharp view,
+  near 0 for a vague one). Vague views are hard to rouse.
+  The cap at 1 guards the rare first-step case of an
+  initial sigma drawn below the floor.
+
+theta_shift is the NET drive toward the engaged pole: most
+sources add to it (more engaged); resignation (below)
+subtracts from it (less engaged).
+
+**From each politician p** (f_pol = policy_persuasion,
+f_trait = trait_persuasion; d_X = min(1, sigma_floor/X.sigma)):
 
 ```
-Pcp.theta_shift[n] += f_pol * (|I(Pcp,Ppp)[n]|
-                              + |I(Pcp,Ppa)[n]|)
-Pca.theta_shift[n] += f_pol * (|I(Pca,Ppa)[n]|
-                              + |I(Pca,Ppp)[n]|)
-Tcp.theta_shift[m] += f_trait * |I(Tcp,Tpx)[m]|
-Tca.theta_shift[m] += f_trait * |I(Tca,Tpx)[m]|
+Pcp.theta_shift[n] += f_pol * d_Pcp
+        * ( |I(Pcp,Ppp)[n]| + w*|I(Pcp,Ppa)[n]| )
+Pca.theta_shift[n] += f_pol * d_Pca * w
+        * ( |I(Pca,Ppa)[n]| +   |I(Pca,Ppp)[n]| )
+Tcp.theta_shift[m] += f_trait * d_Tcp *   |I(Tcp,Tpx)[m]|
+Tca.theta_shift[m] += f_trait * d_Tca * w*|I(Tca,Tpx)[m]|
 ```
 
-From zone averages (scaled by `collective_influence_rate`
-from the TOML; no per-politician factor like f_pol/f_trait):
+Only the pure preference-preference terms (Pcp-Ppp,
+Tcp-Tpx) escape the threat weight; every aversion-touching
+term carries w.
+
+**From zone averages (citizen collective)** (scaled by
+`collective_influence_rate`; no per-politician factor):
 
 ```
-Pcp.theta_shift[n] += |I(Pcp,avg_Pcp)[n]|
-                     + |I(Pcp,avg_Pca)[n]|
-Pca.theta_shift[n] += |I(Pca,avg_Pca)[n]|
-                     + |I(Pca,avg_Pcp)[n]|
-Tcp.theta_shift[m] += |I(Tcp,avg_Tcp)[m]|
-                     + |I(Tcp,avg_Tca)[m]|
-Tca.theta_shift[m] += |I(Tca,avg_Tca)[m]|
-                     + |I(Tca,avg_Tcp)[m]|
+Pcp.theta_shift[n] += d_Pcp
+        * ( |I(Pcp,avg_Pcp)[n]| + w*|I(Pcp,avg_Pca)[n]| )
+Pca.theta_shift[n] += d_Pca * w
+        * ( |I(Pca,avg_Pca)[n]| +   |I(Pca,avg_Pcp)[n]| )
+Tcp.theta_shift[m] += d_Tcp
+        * ( |I(Tcp,avg_Tcp)[m]| + w*|I(Tcp,avg_Tca)[m]| )
+Tca.theta_shift[m] += d_Tca * w
+        * ( |I(Tca,avg_Tca)[m]| +   |I(Tca,avg_Tcp)[m]| )
 ```
+
+**From the government (anger and resignation)**. The
+enacted policy Pge drives engagement through the citizen's
+conscious (stated) policy positions. These contributions
+are applied every step in BOTH the campaign and the
+governing phase (§8.6, §8.6.5), against the current Pge,
+with no stored state — a change of government simply
+washes the old response out.
+
+```
+# Aversion realized -> anger -> more engaged (up).
+anger[n]       = max(0, -I(Pca,Pge)[n])
+Pca.theta_shift[n] += govt_engagement_rate * w * d_Pca
+                          * anger[n]
+
+# Preference unmet -> resignation -> less engaged (down).
+resignation[n] = max(0, sat_ref - I(Pcp,Pge)[n])
+Pcp.theta_shift[n] -= govt_engagement_rate * d_Pcp
+                          * resignation[n]
+```
+
+Anger is aversion-touching, so it carries the threat
+weight w; resignation is preference-side and does not.
+Because of that single factor, the mobilizing channel is
+about twice the withdrawing channel by construction.
+Anger lifts engagement on the aversion the government
+realizes; resignation lowers it on the preference the
+government neglects. Resignation is scaled by definedness
+too, so it bites hardest on SHARP citizens — the
+well-informed voter who knows exactly what they want, sees
+it persistently ignored, and stops participating while
+keeping a sharp opinion intact.
+
+Sign and normalization follow the §9 integral catalog:
+I(Pca,Pge) is most negative when the citizen's aversion
+coincides with the enacted policy (the hated thing is
+done), so -I gives a positive anger signal; sat_ref is a
+reference "fully satisfied" overlap level (a single
+constant near the matched-policy self-overlap; its exact
+value is a code detail). Government engagement acts on
+policy Gaussians only — the government enacts policy, not
+traits — so Tcp/Tca are untouched here.
 
 #### 8.6.3 Policy Position and Spread Accumulation
 
@@ -1111,7 +1433,7 @@ the Gaussian being shifted:
 The susceptibility function (c=1 settled, see §8.6.8):
 
 ```
-S(sigma, theta) = sigma * (1 - cos(theta))
+S(sigma, theta) = sigma * (1 - |cos(theta)|)
 ```
 
 At full engagement (theta=0): S = 0 — fully engaged
@@ -1125,12 +1447,48 @@ only shift meaningfully once disengagement is substantial.
 This means campaigns primarily alter engagement levels;
 position shifts follow only as citizens disengage.
 
-**Shift direction**: The direction of movement is toward
-the source, independent of distance:
+**Resolved — the engagement factor now behaves**: S keeps
+the engagement factor (1 - |cos(theta)|), so engaged
+citizens still resist having their positions moved. The
+former concern — that the engagement *process* feeding
+theta was too simplistic for this factor to behave well —
+is addressed by the redesign in §8.6.2 and §8.6.6.
+Engagement now both rises (a stake-driven push, threat-
+weighted and definedness-gated, plus government-driven
+anger) and falls (government-driven resignation, and a
+spread-proportional fade that bites even at full
+engagement). Citizens no longer march monotonically to
+full engagement and freeze; a stable fraction of vague,
+neglected citizens rests near apathy. With that process in
+place the engagement factor in S is a settled choice, not
+a placeholder. The quadratic slow-start near full
+engagement (above) is therefore a genuine feature:
+campaigns move engagement first, and positions follow only
+as citizens disengage.
+
+**Shift direction and per-politician cap (no overshoot)**:
+Shift *magnitude* is driven by trait alignment and the
+citizen's susceptibility, never by the distance to the
+source. Distance enters in exactly one place: it caps the
+step so a citizen cannot move past the source. For a
+single politician this guarantees the citizen lands on the
+source position instead of overshooting it. The speed may
+be large (the approach can be rapid); the cap only forbids
+crossing the target.
+
+For a citizen Gaussian parameter x (a mu or a sigma) being
+pulled toward a politician target t:
 
 ```
-direction = sign(source_mu[n] - citizen_mu[n])
+gap          = t - x
+speed        = mag * f * S(sigma, theta)   # >= 0, distance-free
+contribution = sign(gap) * min(speed, |gap|)
 ```
+
+f = policy_persuasion is a non-negative magnitude
+(half-normal draw; see the politician scalar state in §7),
+so a politician only ever attracts, never repels. Write
+cap(x, t) for the contribution above.
 
 **From each politician p:**
 
@@ -1142,40 +1500,86 @@ mag       = |trait_sum|
 f         = policy_persuasion
 ```
 
+Politician contributions accumulate into a politician-only
+sub-total, P_pol, kept separate from the community drift
+(see "Separation from community drift" below). Each entry
+uses cap(x, t) and records the target t it used, so the
+span clamp can find the most extreme target.
+
 If trait_sum >= 0 (citizen likes politician):
 
 ```
 for each policy dim n:
-    Pcp.mu_shift[n]    += mag * f
-        * S(Pcp.sigma[n], Pcp.theta[n])
-        * sign(Ppp.mu[n] - Pcp.mu[n])
-    Pcp.sigma_shift[n] += mag * f
-        * S(Pcp.sigma[n], Pcp.theta[n])
-        * sign(Ppp.sigma[n] - Pcp.sigma[n])
-    Pca.mu_shift[n]    += mag * f
-        * S(Pca.sigma[n], Pca.theta[n])
-        * sign(Ppa.mu[n] - Pca.mu[n])
-    Pca.sigma_shift[n] += mag * f
-        * S(Pca.sigma[n], Pca.theta[n])
-        * sign(Ppa.sigma[n] - Pca.sigma[n])
+    P_pol.Pcp.mu[n]    += cap(Pcp.mu[n],    Ppp.mu[n])
+    P_pol.Pcp.sigma[n] += cap(Pcp.sigma[n], Ppp.sigma[n])
+    P_pol.Pca.mu[n]    += cap(Pca.mu[n],    Ppa.mu[n])
+    P_pol.Pca.sigma[n] += cap(Pca.sigma[n], Ppa.sigma[n])
 ```
 
-If trait_sum < 0 (citizen dislikes politician):
+with S evaluated on the citizen Gaussian being shifted, as
+in cap(). If trait_sum < 0 (citizen dislikes politician):
 
 ```
 for each policy dim n:
-    Pcp.sigma_shift[n] += mag * f
-        * S(Pcp.sigma[n], Pcp.theta[n])
-        * sign(sigma_floor - Pcp.sigma[n])
-    Pca.mu_shift[n]    += mag * f * defensive_ratio
-        * S(Pca.sigma[n], Pca.theta[n])
-        * sign(Ppp.mu[n] - Pca.mu[n])
+    # Pcp rigidifies: sigma narrows toward sigma_floor.
+    P_pol.Pcp.sigma[n] += sign(sigma_floor - Pcp.sigma[n])
+        * min(mag*f*S(Pcp.sigma[n], Pcp.theta[n]),
+              |sigma_floor - Pcp.sigma[n]|)
+    # Pca mu moves toward the disliked politician's PREF.
+    P_pol.Pca.mu[n]    += sign(Ppp.mu[n] - Pca.mu[n])
+        * min(mag*f*defensive_ratio
+                  *S(Pca.sigma[n], Pca.theta[n]),
+              |Ppp.mu[n] - Pca.mu[n]|)
 ```
 
 Note: in the defensive case the citizen's aversion mu shifts
 toward the politician's *preference* positions (Ppp), not the
-politician's aversion. The citizen develops an aversion to
-what the disliked politician stands *for*.
+politician's aversion — the citizen develops an aversion to
+what the disliked politician stands *for*. The target
+recorded for the span clamp is the one actually used (Ppp
+here), so a defensive shift is also bounded by the most
+extreme target the citizen was pulled toward.
+
+**Span clamp across politicians (no group overshoot)**:
+The per-politician cap stops any single politician from
+overshooting its own target, but several politicians on the
+same side of the citizen still sum past all of them (e.g.
+mu=0 with two targets at +10 would give +20). To enforce
+"never more extreme, in either direction, than the most
+extreme politician," track per parameter and dimension the
+lowest and highest target used across all contributing
+politicians:
+
+```
+target_lo[n] = min over contributing p of target_p[n]
+target_hi[n] = max over contributing p of target_p[n]
+```
+
+At the application step (§8.6.5), clip the politician-driven
+result into that span, widened to include the starting value
+so a citizen already outside the span is not dragged inward
+(the politicians already pull such a citizen inward via the
+per-politician cap):
+
+```
+x_after_pol = x_old + P_pol.x
+lo          = min(target_lo, x_old)
+hi          = max(target_hi, x_old)
+x_clamped   = clip(x_after_pol, lo, hi)
+```
+
+If no politician contributed to a parameter (e.g. every
+voter too apathetic to be influenced), target_lo/hi default
+to x_old and the clamp is inert.
+
+**Separation from community drift**: the span clamp applies
+ONLY to the politician sub-total P_pol. Community
+(zone-average) drift is accumulated into its own sub-total
+and bounded by its own target — the zone average — not by
+the politician span. Folding the two together would let a
+politician span wrongly cap a community pull, or vice versa.
+The two sub-totals are summed at application after each has
+been clamped to its own targets.
 
 **From zone averages (citizen collective):**
 
@@ -1192,10 +1596,16 @@ trait_rate = sum_m( I(Tcp,avg_Tcp)[m]
 
 trait_rate is always ≥ 0. Policy pref and aver mu and
 sigma always shift toward the zone average policy values.
-Same formulas as the politician positive-trait case with
-f = 1, zone averages replacing politician Gaussians, and
-susceptibility S applied to the citizen Gaussian being
-shifted.
+Same formulas as the politician positive-trait case, using
+cap(x, t) with speed = trait_rate * S(sigma, theta) (i.e.
+f = 1 and mag = trait_rate), and the zone average as the
+target t. The per-target cap applies here too: community
+drift never overshoots the zone average. These
+contributions accumulate into the community sub-total
+(separate from P_pol, see above); the community sub-total
+is bounded by its own target span — for a single zone the
+target is just the zone average, so the bound is simply
+"do not pass the zone average."
 
 **Decision**: The susceptibility model is the chosen
 approach. The force/momentum alternative is back-burnered
@@ -1262,16 +1672,36 @@ parameters in a single pass.
 
 **Position:**
 
+The politician and community sub-totals are each clamped to
+their own target span (§8.6.3) before being summed:
+
 ```
-mu_new = mu + mu_shift
+mu_after_pol = clip(mu + mu_shift_pol,
+                    min(pol_target_lo, mu),
+                    max(pol_target_hi, mu))
+mu_after_com = clip(mu_after_pol + mu_shift_com,
+                    min(com_target_lo, mu_after_pol),
+                    max(com_target_hi, mu_after_pol))
+mu_new       = mu_after_com
 ```
 
-Mu is unbounded on the real line.
+Each clamp uses the position *before* that source is added
+as the widening value, so neither source can carry the
+citizen past its own most extreme target, yet a citizen
+already outside a span is never dragged inward. Mu is
+otherwise unbounded on the real line. (When a source
+contributed nothing, its target_lo/hi default to the current
+mu and its clamp is inert.)
 
 **Spread:**
 
+Sigma follows the same clamp-then-sum pattern as mu, against
+each source's sigma-target span, then the floor is applied:
+
 ```
-sigma_new = max(sigma + sigma_shift, sigma_floor)
+sigma_new = max(clamp_then_sum(sigma, sigma_shift_pol,
+                               sigma_shift_com),
+                sigma_floor)
 ```
 
 sigma_floor prevents degenerate Gaussians (division by zero
@@ -1280,37 +1710,84 @@ finite width.
 
 **Engagement:**
 
-```
-theta_new = theta - theta_shift
-```
-
-The theta_shift is non-negative, so subtraction always drives
-theta toward zero (more engaged). Engagement decay is then
-applied before clamping (Section 8.6.6).
-
-#### 8.6.6 Engagement Decay
-
-After influence-driven engagement shifts, a proportional
-decay pulls every citizen's theta for every stated Gaussian
-toward pi/2 (full apathy):
+For a preference Gaussian (theta toward 0 = engaged):
 
 ```
-theta = clamp(theta * (1 + engagement_decay_rate), 0, pi/2)
+theta_new = theta - theta_shift          # net push
+theta_new = theta_new + fade             # fade to pi/2
+theta_new = clamp(theta_new, 0, pi/2)
 ```
 
-`engagement_decay_rate` is a small positive dimensionless
-constant (the fractional increase in theta per step).
+theta_shift is the NET drive from §8.6.2: positive values
+(politician, community, and anger pushes) drive theta toward
+the engaged pole, while resignation makes it smaller or
+negative, driving theta toward apathy. fade is the spread-
+proportional pull of §8.6.6. Aversion Gaussians use the
+mirrored update (theta toward pi = engaged; see §8.6.6).
+This engagement update runs every step in BOTH the campaign
+and governing phases (§8.6); during governing only the
+government anger/resignation push and the fade are present,
+since no politicians or community averages act then.
 
-Key properties of this formulation:
-- **No decay at full engagement**: when theta = 0, the
-  decay term is zero — a perfectly engaged citizen stays
-  engaged unless actively disturbed.
-- **Self-reinforcing**: the higher theta (the more
-  disengaged), the larger the absolute decay step. Once
-  disengagement begins, it accelerates.
-- **Maximum decay near apathy**: the decay is largest
-  when theta is near pi/2, producing the strongest pull
-  toward full apathy.
+#### 8.6.6 Engagement Fade
+
+After the engagement push of §8.6.2, a fade pulls every
+citizen's theta for every stated Gaussian toward apathy
+(pi/2). The fade is proportional to the Gaussian's own
+spread:
+
+```
+fade = engagement_decay_rate * sigma     # toward pi/2
+# preference: theta_new = clamp(theta + fade, 0,    pi/2)
+# aversion:   theta_new = clamp(theta - fade, pi/2, pi)
+```
+
+`engagement_decay_rate` is a small positive constant — the
+fade in radians contributed per unit of spread per step.
+(This is a change of meaning from the earlier proportional
+rule: the rate now multiplies sigma, not the current
+theta.)
+
+Key properties:
+- **Everyone fades, every step.** sigma is floored at
+  `sigma_floor > 0`, so even the sharpest Gaussian fades by
+  `engagement_decay_rate * sigma_floor` each step. No
+  citizen can freeze at full engagement — the trap of the
+  old proportional rule is gone, because the fade no longer
+  vanishes at the engaged pole.
+- **Sharp holds, vague lapses.** A narrow (sharp) Gaussian
+  fades slowly and holds its engagement; a broad
+  (unsettled) Gaussian fades quickly and sinks to apathy.
+  Spread becomes the single driver of how durable
+  engagement is, matching the definedness gate on the push
+  (§8.6.2): sharp views are both easy to rouse and slow to
+  lapse, vague views both hard to rouse and quick to lapse.
+- **Flat in engagement.** The fade depends on spread, not
+  on the current theta, so two equally-sharp citizens fade
+  by the same amount regardless of how engaged they are. It
+  therefore makes no claim that the most engaged disengage
+  fastest — a property we explicitly rejected.
+
+This fade runs every step in BOTH the campaign and
+governing phases (§8.6), alongside the government
+anger/resignation push, so engagement evolves continuously;
+the phases differ only in which other pushes are present.
+
+*Design-record — rejected alternatives.* Two earlier forms
+were rejected. (1) Fade proportional to distance from the
+engaged pole — `theta *= (1 + rate)` — froze fully engaged
+citizens (no fade at the pole) and let the population
+saturate: the original trap. (2) Fade proportional to
+distance from apathy — broke the trap but made the most
+engaged fade fastest, which is backwards. The spread-
+proportional fade keeps the trap-breaking property of (2)
+without its bad behavior, since its size depends on spread
+rather than on engagement. A purely flat fixed-step fade
+(the same amount for every citizen) was also considered;
+the spread-proportional version is preferred because it
+ties engagement durability to firmness of conviction and
+covers the no-push case (notably the governing phase),
+where a sharp citizen should hold engagement on their own.
 
 The rate is stored as a variable for future dynamic
 behavior (e.g., modulated by well-being or crisis).
@@ -1333,10 +1810,13 @@ TOML configuration:
 
 | Parameter | Purpose | Initial |
 |---|---|---|
-| `engagement_decay_rate` | Fractional per-step theta increase (proportional decay: theta *= (1 + rate)) | TBD |
+| `engagement_decay_rate` | Spread-proportional fade toward apathy per step: fade = rate * sigma (radians of fade per unit of spread per step; replaces the old proportional theta *= (1+rate)) | TBD |
+| `threat_weight` | Multiplier (w) on every engagement term that involves an aversion Gaussian — direct threat or shared opposition; pure preference-preference agreement stays at 1 (§8.6.2) | 2.0 |
+| `govt_engagement_rate` | Scale of the government-driven anger (up) and resignation (down) engagement pushes (§8.6.2) | TBD |
+| `sat_ref` | Reference "fully satisfied" overlap level; resignation grows as overlap(Pcp, Pge) falls below it (§8.6.2). Set near the matched-policy self-overlap | TBD |
 | `defensive_ratio` | Scales targeted backlash mu shift | 1.0 |
-| `sigma_floor` | Minimum sigma for all Gaussians; also the target of defensive narrowing | 0.05 (~20× narrower than a typical initial sigma of O(1)) |
-| `engagement_protection` | c in S() = sigma*(1 - c*cos(theta)); c=1 makes fully engaged citizens completely immovable | 1.0 |
+| `sigma_floor` | Minimum sigma for all Gaussians; the target of defensive narrowing; also the floor that keeps the spread-proportional fade nonzero and sets the maximum definedness (sigma_floor/sigma → 1) | 0.05 (~20× narrower than a typical initial sigma of O(1)) |
+| `engagement_protection` | c in S() = sigma*(1 - c*|cos(theta)|); c=1 makes fully engaged citizens completely immovable | 1.0 |
 
 *Back-burnered — force/momentum parameters*: If the
 dynamics model is ever revisited, additional parameters
@@ -1356,9 +1836,18 @@ model is chosen. Force/momentum dynamics are
 back-burnered (see §8.6.3).
 
 ✅ **Q2 — Susceptibility function form**:
-`S(sigma, theta) = sigma * (1 - cos(theta))` with c=1.
-Fully engaged citizens (theta=0) are completely
-immovable. See §8.6.3 for full description.
+`S(sigma, theta) = sigma * (1 - |cos(theta)|)` with c=1 is
+retained, and the engagement factor is KEPT by design.
+The earlier concern — that the immovability of fully
+engaged citizens only behaves well once the engagement
+*process* feeding theta is fixed — is now resolved by the
+§8.6.2/§8.6.6 redesign: engagement both rises (threat-
+weighted, definedness-gated push plus government anger) and
+falls (government resignation plus a spread-proportional
+fade that bites even at full engagement), so citizens no
+longer saturate and freeze. With that process in place the
+engagement factor in S is a settled choice. See §8.6.3 and
+§8.6.6.
 
 ✅ **Q3 — Defensive narrowing rate**: Susceptibility-
 dependent narrowing is correct. Broad Gaussians
@@ -1393,7 +1882,13 @@ rejected. The anti-spring character already present
 in `S = sigma_citizen * (1 - cos(theta))` is
 sufficient: broader citizens take larger steps and
 naturally decelerate as they narrow toward the
-source.
+source. **Updated**: the constant-magnitude step is
+now additionally capped per source at the gap
+(`min(speed, |gap|)`) and clamped to the span of
+contributing targets, so movement cannot overshoot
+the source — for mu and sigma alike. This preserves
+the distance-independent *magnitude* (still not
+spring-like) while removing overshoot; see §8.6.3.
 
 ---
 
@@ -1509,7 +2004,7 @@ conversion. Key sections:
 
 | Parameter | Purpose |
 |---|---|
-| `patch_size` | Spatial extent of a patch (currently unused in movement) |
+| `patch_size` | Continuous side length of each patch — the extent over which agents may move within a patch. Specified but not yet implemented (see §5.1) |
 | `num_policy_dims` | Number of abstract policy dimensions |
 | `num_trait_dims` | Number of abstract trait dimensions |
 | `num_zone_types` | Number of active hierarchy levels; only the first this-many `[[world.zone_type]]` entries are used |

@@ -434,8 +434,8 @@ class World():
         Each citizen has a scalar well_being value
         computed from the overlap between their
         ideal policy positions and the government's
-        enacted policy (see citizen.py
-        build_response_to_well_being()). This
+        enacted policy (set by citizen.py
+        build_response_to_government()). This
         method averages the well-being of all
         citizens on each patch to produce a 2-D
         heatmap that can be visualized in Paraview

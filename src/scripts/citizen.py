@@ -4,6 +4,89 @@ from gaussian import Gaussian, sample_theta
 from random_state import rng
 
 
+class DirectionalShift():
+    """Accumulates no-overshoot shifts for one Gaussian
+    parameter (a per-dimension mu vector or sigma vector)
+    coming from ONE influence source (e.g. all politicians,
+    or all neighbor zones). Implements DESIGN.md §8.6.3.
+
+    Two ideas combine here:
+
+    1. Per-contribution cap. Each contributor (one
+       politician, one zone) pulls the parameter toward a
+       target at a speed set by trait alignment and
+       susceptibility — NOT by the distance to the target.
+       Distance only caps the step so a single contributor
+       can never carry the citizen past its own target:
+
+           gap          = target - current
+           contribution = sign(gap) * min(speed, |gap|)
+
+       The speed may be large (the approach can be rapid);
+       the cap merely forbids crossing the target.
+
+    2. Span clamp. Several contributors on the same side of
+       the citizen can still sum past all of them. To stop
+       that, we remember the lowest and highest target any
+       contributor pulled toward, and at application time we
+       clamp the moved value into that span — widened to
+       include the starting value so a citizen already
+       outside the span is never dragged inward.
+
+    The net result: the citizen never ends up more extreme,
+    in either direction, than the most extreme target it was
+    actually pulled toward.
+
+    Attributes
+    ----------
+    shift : np.ndarray
+        Running sum of capped contributions, one per
+        dimension.
+    target_lo, target_hi : np.ndarray
+        Lowest / highest target seen so far, per dimension.
+        Initialized to +inf / -inf so the first contribution
+        sets them; if no contribution arrives, the span
+        defaults to the current value at apply() time and the
+        clamp is inert.
+    """
+
+    def __init__(self, num_dims):
+        self.shift = np.zeros(num_dims)
+        self.target_lo = np.full(num_dims, np.inf)
+        self.target_hi = np.full(num_dims, -np.inf)
+
+    def add(self, current, target, speed):
+        """Accumulate one contributor's capped pull of
+        `current` toward `target` at the given `speed`.
+
+        Parameters
+        ----------
+        current : np.ndarray
+            The parameter's present value (read-only here),
+            per dimension.
+        target : np.ndarray or float
+            Where this contributor pulls the parameter.
+        speed : np.ndarray or float
+            Non-negative distance-free pull magnitude
+            (trait alignment x persuasion x susceptibility).
+        """
+        gap = target - current
+        self.shift = self.shift + (
+            np.sign(gap) * np.minimum(speed, np.abs(gap)))
+        self.target_lo = np.minimum(self.target_lo, target)
+        self.target_hi = np.maximum(self.target_hi, target)
+
+    def apply(self, current):
+        """Return `current` moved by the accumulated shift,
+        clamped to the target span (widened by `current` so
+        an already-outside citizen is not dragged inward).
+        """
+        moved = current + self.shift
+        low = np.minimum(self.target_lo, current)
+        high = np.maximum(self.target_hi, current)
+        return np.clip(moved, low, high)
+
+
 class Citizen():
     """A citizen agent in the democracy simulation.
 
@@ -110,7 +193,8 @@ class Citizen():
             (stated pref, stated aver)
           - Scalar parameters: policy_trait_ratio,
             collective_influence_rate, sigma_floor,
-            engagement_decay_rate, defensive_ratio
+            engagement_decay_rate, defensive_ratio,
+            threat_weight, govt_engagement_rate, sat_ref
           - A patch assignment and zone membership
 
         Parameters
@@ -250,22 +334,52 @@ class Citizen():
         #   in build_response_to_politician_influence().
         self.sigma_floor = cit["sigma_floor"]
 
-        # engagement_decay_rate controls how quickly
-        #   citizens drift back toward apathy each step
-        #   in the absence of active stimulation. The
-        #   formula is proportional: theta *= (1 + rate),
-        #   where theta is the "engagement angle" (see
-        #   apply_influence_shifts). Proportional decay
-        #   means a perfectly engaged citizen (angle=0)
-        #   stays engaged, while a slightly disengaged
-        #   citizen accelerates toward full apathy. This
-        #   creates a fundamentally unstable equilibrium
-        #   at apathy: campaigns must continually re-engage
-        #   citizens, not just engage them once. Stored as
-        #   an instance variable so it can be made dynamic
-        #   in the future (e.g., driven by well-being).
+        # engagement_decay_rate controls the steady fade
+        #   back toward apathy each step (DESIGN §8.6.6).
+        #   The fade is proportional to the Gaussian's own
+        #   spread: fade = engagement_decay_rate * sigma,
+        #   measured in radians of theta moved toward pi/2
+        #   per step. Because sigma is floored at
+        #   sigma_floor, every citizen fades a little every
+        #   step, so no one freezes at full engagement. A
+        #   sharp (narrow-sigma) view fades slowly and holds
+        #   its engagement; a broad, unsettled view fades
+        #   fast and lapses to apathy. The fade depends on
+        #   spread, NOT on the current engagement level, so
+        #   it makes no claim that the most engaged fade
+        #   fastest. (This replaced the older proportional
+        #   theta *= (1 + rate) rule, which could not act at
+        #   full engagement and trapped citizens there.)
+        #   Stored as an instance variable so it can be made
+        #   dynamic in the future (e.g., driven by crisis).
         self.engagement_decay_rate = (
                 cit["engagement_decay_rate"])
+
+        # threat_weight (w) is the multiplier applied to
+        #   every engagement contribution that involves an
+        #   aversion Gaussian — a direct threat or a shared
+        #   opposition (DESIGN §8.6.2). Pure preference-meets-
+        #   preference agreement counts at weight 1; every
+        #   aversion-touching term counts at w. A shared
+        #   enemy or a direct threat mobilizes harder than
+        #   shared enthusiasm, so w is typically about 2.
+        self.threat_weight = cit["threat_weight"]
+
+        # govt_engagement_rate scales the government-driven
+        #   engagement response (DESIGN §8.6.2): anger when a
+        #   stated aversion is enacted (engagement up) and
+        #   resignation when a stated preference goes unmet
+        #   (engagement down). Applied every step in both the
+        #   campaign and govern phases. Tunable; see §8.6.8.
+        self.govt_engagement_rate = (
+                cit["govt_engagement_rate"])
+
+        # sat_ref is the reference "fully satisfied" overlap
+        #   level for resignation (DESIGN §8.6.2): resignation
+        #   grows as the conscious satisfaction overlap
+        #   I(Pcp, Pge) falls below sat_ref. Set near the
+        #   matched-policy self-overlap. Tunable; see §8.6.8.
+        self.sat_ref = cit["sat_ref"]
 
         # defensive_ratio scales the targeted backlash response
         #   when a citizen dislikes a politician (negative trait
@@ -528,20 +642,50 @@ class Citizen():
         #   (A plain Python list would extend, not add.)
         #   Naming convention: the prefix names the Gaussian type
         #   whose parameter is being shifted.
+        #
+        #   Engagement (theta) shifts stay as plain summed arrays:
+        #   they are not clamped, and both politician and community
+        #   contributions accumulate into one array per Gaussian.
         n = num_policy_dims
         m = num_trait_dims
-        self.Pcp_orien_shift  = np.zeros(n)  # policy pref theta
-        self.Pcp_pos_shift    = np.zeros(n)  # policy pref mu
-        self.Pcp_stddev_shift = np.zeros(n)  # policy pref sigma
-        self.Pca_orien_shift  = np.zeros(n)  # policy aver theta
-        self.Pca_pos_shift    = np.zeros(n)  # policy aver mu
-        self.Pca_stddev_shift = np.zeros(n)  # policy aver sigma
-        self.Tcp_orien_shift  = np.zeros(m)  # trait pref theta
-        self.Tcp_pos_shift    = np.zeros(m)  # trait pref mu
-        self.Tcp_stddev_shift = np.zeros(m)  # trait pref sigma
-        self.Tca_orien_shift  = np.zeros(m)  # trait aver theta
-        self.Tca_pos_shift    = np.zeros(m)  # trait aver mu
-        self.Tca_stddev_shift = np.zeros(m)  # trait aver sigma
+        self.Pcp_orien_shift = np.zeros(n)  # policy pref theta
+        self.Pca_orien_shift = np.zeros(n)  # policy aver theta
+        self.Tcp_orien_shift = np.zeros(m)  # trait pref theta
+        self.Tca_orien_shift = np.zeros(m)  # trait aver theta
+
+        #   Position (mu) and spread (sigma) shifts use the
+        #   no-overshoot DirectionalShift accumulator (§8.6.3),
+        #   and they split by influence SOURCE so each source can
+        #   be clamped to its own target span before the two are
+        #   summed (§8.6.5). Politicians never alter citizen
+        #   traits (§8.6.4), so Tcp/Tca have a community source
+        #   only.
+        self.Pcp_mu_pol  = DirectionalShift(n)  # politician source
+        self.Pcp_sig_pol = DirectionalShift(n)
+        self.Pca_mu_pol  = DirectionalShift(n)
+        self.Pca_sig_pol = DirectionalShift(n)
+
+        self.Pcp_mu_com  = DirectionalShift(n)  # community source
+        self.Pcp_sig_com = DirectionalShift(n)
+        self.Pca_mu_com  = DirectionalShift(n)
+        self.Pca_sig_com = DirectionalShift(n)
+        self.Tcp_mu_com  = DirectionalShift(m)
+        self.Tcp_sig_com = DirectionalShift(m)
+        self.Tca_mu_com  = DirectionalShift(m)
+        self.Tca_sig_com = DirectionalShift(m)
+
+
+    def _definedness(self, gaussian):
+        # Definedness factor d for the engagement push
+        #   (DESIGN §8.6.2): d = sigma_floor / sigma, capped
+        #   at 1. It is near 1 for a sharp (narrow) view —
+        #   easy to rouse — and near 0 for a vague (broad)
+        #   one — hard to rouse. The cap guards the rare
+        #   first-step case where an initial sigma was drawn
+        #   below the floor (the floor is otherwise enforced
+        #   on every apply step). Returned per-dimension.
+        return np.minimum(
+                1.0, self.sigma_floor / gaussian.sigma)
 
 
     def build_response_to_politician_influence(self):
@@ -616,25 +760,40 @@ class Citizen():
         # contribute: you become engaged by opposition as well as
         # support. Scaled by the politician's persuasion factors
         # (f_pol for policy overlaps, f_trait for trait overlaps).
-        # f_pol and f_trait are drawn from zero-mean Gaussians and can
-        # be positive (amplifies) or negative (dampens).
+        # f_pol and f_trait are non-negative magnitudes (half-
+        # normal draws), so a more persuasive politician always
+        # raises engagement faster — persuasion never drives a
+        # citizen toward apathy. Disengagement is the job of the
+        # separate engagement-decay mechanism, not persuasion.
         for pol_idx, politician in enumerate(self.politician_list):
             f_pol   = politician.policy_persuasion
             f_trait = politician.trait_persuasion
 
-            # --- Engagement shifts ---
-            # Pcp is driven by policy integrals involving Pcp.
-            # Pca is driven by policy integrals involving Pca.
-            self.Pcp_orien_shift += f_pol * (
+            # --- Engagement shifts (DESIGN §8.6.2) ---
+            # Pcp is driven by policy integrals involving Pcp;
+            #   Pca by integrals involving Pca. Each |overlap|
+            #   is scaled two ways: by the definedness
+            #   d = sigma_floor/sigma of the Gaussian being
+            #   shifted (sharp views rouse easily, vague ones
+            #   barely move) and by the threat weight w on
+            #   every term that touches an aversion. Only the
+            #   pure preference-meets-preference terms
+            #   (Pcp-Ppp and Tcp-Tpx) escape w.
+            w = self.threat_weight
+            d_Pcp = self._definedness(self.stated_policy_pref)
+            d_Pca = self._definedness(self.stated_policy_aver)
+            d_Tcp = self._definedness(self.stated_trait_pref)
+            d_Tca = self._definedness(self.stated_trait_aver)
+            self.Pcp_orien_shift += f_pol * d_Pcp * (
                 np.abs(self.Pcp_Ppp_ol[pol_idx])
-                + np.abs(self.Pcp_Ppa_ol[pol_idx]))
-            self.Pca_orien_shift += f_pol * (
+                + w * np.abs(self.Pcp_Ppa_ol[pol_idx]))
+            self.Pca_orien_shift += f_pol * d_Pca * w * (
                 np.abs(self.Pca_Ppa_ol[pol_idx])
                 + np.abs(self.Pca_Ppp_ol[pol_idx]))
             self.Tcp_orien_shift += (
-                f_trait * np.abs(self.Tcp_Tpx_ol[pol_idx]))
-            self.Tca_orien_shift += (
-                f_trait * np.abs(self.Tca_Tpx_ol[pol_idx]))
+                f_trait * d_Tcp * np.abs(self.Tcp_Tpx_ol[pol_idx]))
+            self.Tca_orien_shift += (f_trait * d_Tca * w
+                * np.abs(self.Tca_Tpx_ol[pol_idx]))
 
             # --- Trait sum: the gate for policy shifts ---
             # Signed sum of all trait overlaps citizen↔politician.
@@ -656,33 +815,42 @@ class Citizen():
                 * (1.0 - np.abs(
                     self.stated_policy_aver.cos_theta)))
 
+            # speed = trait magnitude x persuasion x
+            #   susceptibility (>= 0, distance-free). The
+            #   DirectionalShift accumulator caps each pull at
+            #   the gap so no single politician overshoots, and
+            #   records the target for the span clamp (§8.6.3).
+            speed_Pcp = mag * f_pol * S_Pcp
+            speed_Pca = mag * f_pol * S_Pca
             if trait_sum >= 0:
                 # Attraction branch: Pcp → Ppp, Pca → Ppa.
-                # Direction is sign(source_mu - citizen_mu):
-                # a one-unit impulse per step, gated by
-                # susceptibility and trait magnitude.
                 Ppp_mu    = politician.ext_policy_pref.mu
                 Ppp_sigma = politician.ext_policy_pref.sigma
                 Ppa_mu    = politician.ext_policy_aver.mu
                 Ppa_sigma = politician.ext_policy_aver.sigma
-                self.Pcp_pos_shift += (mag * f_pol * S_Pcp
-                    * np.sign(Ppp_mu - self.stated_policy_pref.mu))
-                self.Pcp_stddev_shift += (mag * f_pol * S_Pcp
-                    * np.sign(Ppp_sigma - self.stated_policy_pref.sigma))
-                self.Pca_pos_shift += (mag * f_pol * S_Pca
-                    * np.sign(Ppa_mu - self.stated_policy_aver.mu))
-                self.Pca_stddev_shift += (mag * f_pol * S_Pca
-                    * np.sign(Ppa_sigma - self.stated_policy_aver.sigma))
+                self.Pcp_mu_pol.add(
+                    self.stated_policy_pref.mu, Ppp_mu, speed_Pcp)
+                self.Pcp_sig_pol.add(
+                    self.stated_policy_pref.sigma, Ppp_sigma,
+                    speed_Pcp)
+                self.Pca_mu_pol.add(
+                    self.stated_policy_aver.mu, Ppa_mu, speed_Pca)
+                self.Pca_sig_pol.add(
+                    self.stated_policy_aver.sigma, Ppa_sigma,
+                    speed_Pca)
             else:
                 # Defensive branch: rigidity + targeted backlash.
-                # Pcp sigma narrows toward sigma_floor.
-                # Pca mu shifts toward politician's PREFERENCE
-                #   (not aversion), scaled by defensive_ratio.
+                # Pcp sigma narrows toward sigma_floor; Pca mu
+                #   shifts toward the politician's PREFERENCE (not
+                #   aversion), scaled by defensive_ratio. Pcp mu
+                #   and Pca sigma do not move in this branch.
                 Ppp_mu = politician.ext_policy_pref.mu
-                self.Pcp_stddev_shift += (mag * f_pol * S_Pcp
-                    * np.sign(self.sigma_floor - self.stated_policy_pref.sigma))
-                self.Pca_pos_shift += (mag * f_pol * self.defensive_ratio
-                    * S_Pca * np.sign(Ppp_mu - self.stated_policy_aver.mu))
+                self.Pcp_sig_pol.add(
+                    self.stated_policy_pref.sigma,
+                    self.sigma_floor, speed_Pcp)
+                self.Pca_mu_pol.add(
+                    self.stated_policy_aver.mu, Ppp_mu,
+                    self.defensive_ratio * speed_Pca)
 
 
     def build_response_to_citizen_collective(self):
@@ -739,23 +907,35 @@ class Citizen():
             * (1.0 - np.abs(
                 self.stated_trait_aver.cos_theta)))
 
+        # Threat weight and definedness for the engagement
+        #   push, the same rule as politician influence
+        #   (DESIGN §8.6.2). d = sigma_floor/sigma scales the
+        #   push by how sharply each view is held; w weights
+        #   every aversion-touching term.
+        w = self.threat_weight
+        d_Pcp = self._definedness(self.stated_policy_pref)
+        d_Pca = self._definedness(self.stated_policy_aver)
+        d_Tcp = self._definedness(self.stated_trait_pref)
+        d_Tca = self._definedness(self.stated_trait_aver)
+
         for zone_idx, zone in enumerate(self.zone_list):
 
-            # --- Engagement shifts (§8.6.2) ---
-            # |overlap| drives theta toward real. Cross-terms
-            #   (pref×aver) are included: both agreement and
-            #   disagreement with the community increase engagement
-            #   on community-relevant issues.
-            self.Pcp_orien_shift += cir * (
+            # --- Engagement shifts (DESIGN §8.6.2) ---
+            # |overlap| drives theta toward the engaged pole,
+            #   scaled by definedness d and threat weight w.
+            #   Cross-terms (pref×aver) carry w: both agreement
+            #   and shared/opposed stances raise engagement on
+            #   community-relevant issues, threats more so.
+            self.Pcp_orien_shift += cir * d_Pcp * (
                 np.abs(self.Pcp_Pcp_ol[zone_idx])
-                + np.abs(self.Pcp_Pca_ol[zone_idx]))
-            self.Pca_orien_shift += cir * (
+                + w * np.abs(self.Pcp_Pca_ol[zone_idx]))
+            self.Pca_orien_shift += cir * d_Pca * w * (
                 np.abs(self.Pca_Pca_ol[zone_idx])
                 + np.abs(self.Pca_Pcp_ol[zone_idx]))
-            self.Tcp_orien_shift += cir * (
+            self.Tcp_orien_shift += cir * d_Tcp * (
                 np.abs(self.Tcp_Tcp_ol[zone_idx])
-                + np.abs(self.Tcp_Tca_ol[zone_idx]))
-            self.Tca_orien_shift += cir * (
+                + w * np.abs(self.Tcp_Tca_ol[zone_idx]))
+            self.Tca_orien_shift += cir * d_Tca * w * (
                 np.abs(self.Tca_Tca_ol[zone_idx])
                 + np.abs(self.Tca_Tcp_ol[zone_idx]))
 
@@ -768,32 +948,44 @@ class Citizen():
                 + np.sum(self.Tca_Tca_ol[zone_idx]))
 
             # --- Policy position and spread shifts (§8.6.3) ---
-            # Unconditional: Pcp drifts toward avg_Pcp,
-            #   Pca toward avg_Pca. No defensive branch.
-            # Direction = sign(zone_avg_mu - citizen_mu):
-            #   one-unit impulse per step, gated by susceptibility
-            #   and trait_rate.
-            self.Pcp_pos_shift += (cir * trait_rate * S_Pcp
-                * np.sign(zone.avg_Pcp.mu - self.stated_policy_pref.mu))
-            self.Pcp_stddev_shift += (cir * trait_rate * S_Pcp
-                * np.sign(zone.avg_Pcp.sigma - self.stated_policy_pref.sigma))
-            self.Pca_pos_shift += (cir * trait_rate * S_Pca
-                * np.sign(zone.avg_Pca.mu - self.stated_policy_aver.mu))
-            self.Pca_stddev_shift += (cir * trait_rate * S_Pca
-                * np.sign(zone.avg_Pca.sigma - self.stated_policy_aver.sigma))
+            # Unconditional: Pcp drifts toward avg_Pcp, Pca toward
+            #   avg_Pca. No defensive branch. speed = community rate
+            #   x trait_rate x susceptibility (>= 0, distance-free).
+            #   The same no-overshoot cap and span clamp apply, so
+            #   community drift never passes the zone average.
+            speed_Pcp = cir * trait_rate * S_Pcp
+            speed_Pca = cir * trait_rate * S_Pca
+            self.Pcp_mu_com.add(
+                self.stated_policy_pref.mu, zone.avg_Pcp.mu,
+                speed_Pcp)
+            self.Pcp_sig_com.add(
+                self.stated_policy_pref.sigma, zone.avg_Pcp.sigma,
+                speed_Pcp)
+            self.Pca_mu_com.add(
+                self.stated_policy_aver.mu, zone.avg_Pca.mu,
+                speed_Pca)
+            self.Pca_sig_com.add(
+                self.stated_policy_aver.sigma, zone.avg_Pca.sigma,
+                speed_Pca)
 
             # --- Trait position and spread shifts (§8.6.4) ---
-            # Same trait_rate drives trait acclimatization. Tcp drifts
-            #   toward avg_Tcp; Tca toward avg_Tca. This is the sole
-            #   mechanism for trait change.
-            self.Tcp_pos_shift += (cir * trait_rate * S_Tcp
-                * np.sign(zone.avg_Tcp.mu - self.stated_trait_pref.mu))
-            self.Tcp_stddev_shift += (cir * trait_rate * S_Tcp
-                * np.sign(zone.avg_Tcp.sigma - self.stated_trait_pref.sigma))
-            self.Tca_pos_shift += (cir * trait_rate * S_Tca
-                * np.sign(zone.avg_Tca.mu - self.stated_trait_aver.mu))
-            self.Tca_stddev_shift += (cir * trait_rate * S_Tca
-                * np.sign(zone.avg_Tca.sigma - self.stated_trait_aver.sigma))
+            # Same trait_rate drives trait acclimatization. Tcp
+            #   drifts toward avg_Tcp; Tca toward avg_Tca. This is
+            #   the sole mechanism for trait change.
+            speed_Tcp = cir * trait_rate * S_Tcp
+            speed_Tca = cir * trait_rate * S_Tca
+            self.Tcp_mu_com.add(
+                self.stated_trait_pref.mu, zone.avg_Tcp.mu,
+                speed_Tcp)
+            self.Tcp_sig_com.add(
+                self.stated_trait_pref.sigma, zone.avg_Tcp.sigma,
+                speed_Tcp)
+            self.Tca_mu_com.add(
+                self.stated_trait_aver.mu, zone.avg_Tca.mu,
+                speed_Tca)
+            self.Tca_sig_com.add(
+                self.stated_trait_aver.sigma, zone.avg_Tca.sigma,
+                speed_Tca)
 
 
     def apply_influence_shifts(self):
@@ -801,7 +993,7 @@ class Citizen():
         #   two-phase accumulate-then-apply design (see
         #   DESIGN.md §8.6). During the accumulation phase,
         #   build_response_to_politician_influence(),
-        #   build_response_to_well_being(), and
+        #   build_response_to_government(), and
         #   build_response_to_citizen_collective() each add
         #   their contributions to twelve shared shift
         #   arrays — three per Gaussian type (Pcp, Pca,
@@ -809,15 +1001,16 @@ class Citizen():
         #   position (mu), and spread (sigma). Because
         #   those methods write to arrays rather than
         #   mutating Gaussian parameters directly, the
-        #   order in which the three sources are processed
-        #   is irrelevant — they all observe the same
-        #   unchanged Gaussian state from the start of the
-        #   step. This method is the apply phase: it
-        #   flushes all accumulated shifts into the actual
-        #   Gaussian parameters in one pass, then enforces
-        #   constraints and decays engagement.
+        #   order in which the sources are processed is
+        #   irrelevant — they all observe the same unchanged
+        #   Gaussian state from the start of the step. This
+        #   method is the apply phase: it flushes the
+        #   position (mu) and spread (sigma) shifts into the
+        #   actual Gaussian parameters, then hands the
+        #   engagement (theta) update to apply_engagement_
+        #   shifts() (shared with the govern phase).
         #
-        # Three independent Gaussian quantities are updated:
+        # Two of the three quantities are updated here:
         #
         #   mu (position): shifts the center of the
         #     Gaussian along the policy/trait axis — where
@@ -840,286 +1033,252 @@ class Citizen():
         #     degenerate near-zero widths that would cause
         #     division-by-zero in alpha = 1/(2*sigma^2).
         #
-        #   theta (engagement): shifts Im(theta) toward
-        #     the "engaged" pole of the Gaussian, then
-        #     decays it proportionally back toward apathy.
-        #     The theta mechanics are described in detail
-        #     below.
+        #   theta (engagement) is updated separately in
+        #     apply_engagement_shifts(), called at the end —
+        #     see that method for the sign convention and the
+        #     spread-proportional fade.
 
-        # -------------------------------------------------------
-        # Theta (engagement) mechanics
-        # -------------------------------------------------------
-        #
-        # The citizen's engagement with each issue is
-        #   encoded in the imaginary part of theta,
-        #   Im(theta). The overlap integral formula uses
-        #   cos(Im(theta)), so:
-        #     cos = 1 (or -1)  -> fully engaged
-        #     cos = 0          -> fully apathetic; the
-        #                         Gaussian contributes
-        #                         nothing to any integral
-        #
-        # Preference and aversion Gaussians are assigned
-        #   opposite halves of [0, pi] so that their
-        #   overlap integrals carry the right sign
-        #   automatically — no special-casing required:
-        #
-        #   Preference: Im(theta) in [0, pi/2)
-        #     cos(Im(theta)) in (0, 1]  (positive)
-        #     "more engaged" means Im(theta) -> 0
-        #     "more apathetic" means Im(theta) -> pi/2
-        #
-        #   Aversion: Im(theta) in (pi/2, pi]
-        #     cos(Im(theta)) in [-1, 0) (negative)
-        #     "more engaged" means Im(theta) -> pi
-        #     "more apathetic" means Im(theta) -> pi/2
-        #
-        # Consequence: the engagement shift must push
-        #   Im(theta) in opposite directions for the two
-        #   types. Subtracting a positive shift from a
-        #   preference moves it toward 0 (more engaged);
-        #   adding a positive shift to an aversion moves
-        #   it toward pi (more engaged). Both converge
-        #   on apathy at pi/2 from their respective sides.
-        #
-        # Each Gaussian type has its own independent shift
-        #   arrays (Pcp, Pca, Tcp, Tca), so each receives
-        #   only the contributions intended for it. The
-        #   defensive branch accumulates into Pcp and Pca
-        #   independently; no cross-contamination occurs.
-        #
-        # Engagement decay (DESIGN.md §8.6.6):
-        #   After the influence-driven shift, each theta
-        #   decays proportionally back toward apathy via
-        #   alpha *= (1 + engagement_decay_rate), where
-        #   "alpha" is the "engagement angle" — always in
-        #   [0, pi/2] regardless of Gaussian type:
-        #     preference: alpha = Im(theta) directly
-        #     aversion:   alpha = pi - Im(theta) (mirrored,
-        #                 so alpha=0 means Im(theta)=pi,
-        #                 which is maximum aversion
-        #                 engagement)
-        #   Multiplying alpha by (1 + rate) > 1 makes it
-        #   grow toward pi/2 (apathy) each step. Key
-        #   properties:
-        #     - alpha=0 (full engagement): 0*(1+rate)=0,
-        #       so perfectly engaged citizens do not decay.
-        #     - Larger alpha decays faster: disengagement
-        #       is self-reinforcing and accelerates.
-        #   After decay, aversion Im(theta) is recovered
-        #   as pi - alpha_decayed.
+        # --- Policy preference (Pcp) ---
+        # Apply the politician sub-total first, then the community
+        #   sub-total, each clamped to its own target span
+        #   (§8.6.5). Clamping per source — using the value BEFORE
+        #   that source is added as the widening bound — guarantees
+        #   neither source carries the citizen past its own most
+        #   extreme target. sigma_floor is applied last as a safety
+        #   floor (the span clamp already keeps sigma within the
+        #   contributed targets).
+        mu = self.Pcp_mu_pol.apply(self.stated_policy_pref.mu)
+        mu = self.Pcp_mu_com.apply(mu)
+        self.stated_policy_pref.mu = mu
+        sigma = self.Pcp_sig_pol.apply(self.stated_policy_pref.sigma)
+        sigma = self.Pcp_sig_com.apply(sigma)
+        self.stated_policy_pref.sigma = np.maximum(
+                sigma, self.sigma_floor)
 
+        # --- Policy aversion (Pca) ---
+        # Same clamp-then-sum pattern as Pcp. The politician
+        #   sub-total here may come from the attraction OR the
+        #   defensive branch; the community sub-total is always
+        #   attraction toward the zone average.
+        mu = self.Pca_mu_pol.apply(self.stated_policy_aver.mu)
+        mu = self.Pca_mu_com.apply(mu)
+        self.stated_policy_aver.mu = mu
+        sigma = self.Pca_sig_pol.apply(self.stated_policy_aver.sigma)
+        sigma = self.Pca_sig_com.apply(sigma)
+        self.stated_policy_aver.sigma = np.maximum(
+                sigma, self.sigma_floor)
+
+        # --- Trait preference (Tcp) ---
+        # Trait shifts have a community source only (politicians
+        #   never alter citizen traits, §8.6.4), so there is one
+        #   sub-total to clamp and apply.
+        self.stated_trait_pref.mu = self.Tcp_mu_com.apply(
+                self.stated_trait_pref.mu)
+        self.stated_trait_pref.sigma = np.maximum(
+                self.Tcp_sig_com.apply(
+                    self.stated_trait_pref.sigma),
+                self.sigma_floor)
+
+        # --- Trait aversion (Tca) ---
+        # Identical pattern to trait preference.
+        self.stated_trait_aver.mu = self.Tca_mu_com.apply(
+                self.stated_trait_aver.mu)
+        self.stated_trait_aver.sigma = np.maximum(
+                self.Tca_sig_com.apply(
+                    self.stated_trait_aver.sigma),
+                self.sigma_floor)
+
+        # Engagement (theta) is updated last, in the shared
+        #   helper used by BOTH the campaign and govern phases
+        #   (§8.6.5): the net theta_shift drives toward the
+        #   engaged pole and the spread-proportional fade pulls
+        #   back toward apathy. The helper also refreshes the
+        #   cached integration variables, so they reflect the
+        #   sigma changes applied just above as well.
+        self.apply_engagement_shifts()
+
+
+    def apply_engagement_shifts(self):
+        # Apply the accumulated engagement (theta) shifts and the
+        #   steady fade toward apathy, then refresh the cached
+        #   integration variables. This runs EVERY step in BOTH
+        #   the campaign and the govern phases (DESIGN §8.6,
+        #   §8.6.5–§8.6.6), so engagement is one continuous
+        #   process; the phases differ only in which sources fed
+        #   the theta_shift arrays during accumulation.
+        #
+        # Theta sign convention (see §8.6.5):
+        #   Preference Gaussians: Im(theta) in [0, pi/2], engaged
+        #     pole at 0. Subtracting the (net) theta_shift drives
+        #     toward 0 (more engaged); the fade adds back toward
+        #     pi/2 (apathy).
+        #   Aversion Gaussians: Im(theta) in [pi/2, pi], engaged
+        #     pole at pi. Adding the theta_shift drives toward pi;
+        #     the fade subtracts back toward pi/2.
+        #
+        # theta_shift is the NET drive: most sources add to it
+        #   (toward engaged), while government resignation
+        #   subtracts from it (toward apathy), so the net value
+        #   may be positive or negative.
+        #
+        # The fade (DESIGN §8.6.6) is proportional to each
+        #   Gaussian's own spread: fade = engagement_decay_rate *
+        #   sigma. Because sigma is floored at sigma_floor, every
+        #   citizen fades a little every step — no one freezes at
+        #   full engagement. A sharp (narrow-sigma) view fades
+        #   slowly and holds engagement; a broad view fades fast
+        #   and lapses to apathy. The fade depends on spread, not
+        #   on the current engagement level, so it does not make
+        #   the most engaged fade fastest.
         half_pi = np.pi / 2.0
         edr = self.engagement_decay_rate
 
-        # --- Policy preference (Pcp) ---
-        # Apply Pcp-specific shifts (from the attraction branch
-        #   and from citizen-collective unconditional drift).
-        self.stated_policy_pref.mu += self.Pcp_pos_shift
-        self.stated_policy_pref.sigma = np.maximum(
-                self.stated_policy_pref.sigma
-                + self.Pcp_stddev_shift,
-                self.sigma_floor)
-        # Subtract the engagement shift: drives Im(theta)
-        #   toward 0 (maximum preference engagement).
-        #   Clip to [0, pi/2] enforces the preference
-        #   convention after the shift.
-        pref_im = np.clip(
-                self.stated_policy_pref.theta.imag
-                - self.Pcp_orien_shift,
-                0.0, half_pi)
-        # Apply proportional decay: alpha grows toward
-        #   pi/2. Re-clip to guard against floating-point
-        #   drift past pi/2.
-        pref_im = np.clip(
-                pref_im * (1.0 + edr), 0.0, half_pi)
-        self.stated_policy_pref.theta = pref_im * 1j
+        # --- Preference types (Pcp, Tcp) ---
+        for gaussian, orien_shift in (
+                (self.stated_policy_pref, self.Pcp_orien_shift),
+                (self.stated_trait_pref, self.Tcp_orien_shift)):
+            fade = edr * gaussian.sigma
+            pref_im = np.clip(
+                    gaussian.theta.imag - orien_shift,
+                    0.0, half_pi)
+            pref_im = np.clip(pref_im + fade, 0.0, half_pi)
+            gaussian.theta = pref_im * 1j
 
-        # --- Policy aversion (Pca) ---
-        # Apply Pca-specific shifts (from the attraction OR
-        #   defensive branch, and from collective drift).
-        self.stated_policy_aver.mu += self.Pca_pos_shift
-        self.stated_policy_aver.sigma = np.maximum(
-                self.stated_policy_aver.sigma
-                + self.Pca_stddev_shift,
-                self.sigma_floor)
-        # Add the engagement shift: drives Im(theta)
-        #   toward pi (maximum aversion engagement).
-        #   Clip to [pi/2, pi] enforces the aversion
-        #   convention after the shift.
-        aver_im = np.clip(
-                self.stated_policy_aver.theta.imag
-                + self.Pca_orien_shift,
-                half_pi, np.pi)
-        # Compute the engagement angle alpha = pi - Im(theta)
-        #   (so alpha=0 is full engagement, alpha=pi/2 is
-        #   full apathy), decay it, then mirror back to
-        #   Im(theta) = pi - alpha_decayed.
-        alpha = np.clip(
-                (np.pi - aver_im) * (1.0 + edr),
-                0.0, half_pi)
-        self.stated_policy_aver.theta = (np.pi - alpha) * 1j
+        # --- Aversion types (Pca, Tca) ---
+        for gaussian, orien_shift in (
+                (self.stated_policy_aver, self.Pca_orien_shift),
+                (self.stated_trait_aver, self.Tca_orien_shift)):
+            fade = edr * gaussian.sigma
+            aver_im = np.clip(
+                    gaussian.theta.imag + orien_shift,
+                    half_pi, np.pi)
+            aver_im = np.clip(aver_im - fade, half_pi, np.pi)
+            gaussian.theta = aver_im * 1j
 
-        # --- Trait preference (Tcp) ---
-        # Identical pattern to policy preference, applied to
-        #   trait dimensions. Tcp shifts come only from
-        #   citizen-collective influence (§8.6.4); politicians
-        #   do not directly alter citizen traits.
-        self.stated_trait_pref.mu += self.Tcp_pos_shift
-        self.stated_trait_pref.sigma = np.maximum(
-                self.stated_trait_pref.sigma
-                + self.Tcp_stddev_shift,
-                self.sigma_floor)
-        pref_im = np.clip(
-                self.stated_trait_pref.theta.imag
-                - self.Tcp_orien_shift,
-                0.0, half_pi)
-        pref_im = np.clip(
-                pref_im * (1.0 + edr), 0.0, half_pi)
-        self.stated_trait_pref.theta = pref_im * 1j
-
-        # --- Trait aversion (Tca) ---
-        # Identical pattern to policy aversion, applied to
-        #   trait dimensions.
-        self.stated_trait_aver.mu += self.Tca_pos_shift
-        self.stated_trait_aver.sigma = np.maximum(
-                self.stated_trait_aver.sigma
-                + self.Tca_stddev_shift,
-                self.sigma_floor)
-        aver_im = np.clip(
-                self.stated_trait_aver.theta.imag
-                + self.Tca_orien_shift,
-                half_pi, np.pi)
-        alpha = np.clip(
-                (np.pi - aver_im) * (1.0 + edr),
-                0.0, half_pi)
-        self.stated_trait_aver.theta = (np.pi - alpha) * 1j
-
-        # §8.6.7: Recompute derived variables (alpha,
-        #   cos_theta, self_norm) cached inside each
-        #   Gaussian. These are used by integral() in the
-        #   next campaign step. Because we changed sigma
-        #   and theta above, the cached values are now
-        #   stale and must be refreshed before any overlap
-        #   integral is computed. The ideal_policy_pref
-        #   Gaussian is intentionally excluded: it
-        #   represents the citizen's true (hidden) best
-        #   interest and is never subject to influence or
-        #   decay (DESIGN.md §8.6).
+        # §8.6.7: Refresh derived variables (alpha, cos_theta,
+        #   self_norm) cached inside each shifted Gaussian. They
+        #   are stale after the sigma/theta changes and must be
+        #   current before the next overlap integral. The
+        #   ideal_policy_pref Gaussian is intentionally excluded:
+        #   it is the citizen's true (hidden) interest and is
+        #   never subject to influence or fade (DESIGN §8.6).
         self.stated_policy_pref.update_integration_variables()
         self.stated_policy_aver.update_integration_variables()
         self.stated_trait_pref.update_integration_variables()
         self.stated_trait_aver.update_integration_variables()
 
 
-    def recompute_well_being(self, world):
-        """Recompute well-being from the current
-        Pge without accumulating engagement shifts.
+    def recompute_government_overlaps(self, world):
+        """Reset and recompute the three citizen-vs-
+        government overlap lists against the current
+        enacted policy.
 
-        Used during the govern phase to update the
-        well-being scalar for output after each
-        govern step changes Pge. Unlike
-        build_response_to_well_being(), this method
-        does NOT call _well_being_to_engagement()
-        because the govern phase has no
-        accumulate-then-apply cycle.
+        Used in the govern phase, where Pge changes every
+        step but the full compute_all_overlaps() sensing
+        pass (which also rebuilds the politician and
+        community overlaps) is not run. This refreshes only
+        the government overlaps the engagement response and
+        the well-being measure depend on: the conscious
+        preference and aversion overlaps (Pcp/Pca vs Pge)
+        and the ideal overlap (Pci vs Pge).
 
-        Pge.update_integration_variables() must be
-        called before this method so that the
-        integral uses the updated Pge parameters.
+        Pge.update_integration_variables() must be called
+        before this method so the integrals use the updated
+        Pge parameters.
         """
-        ol = self.ideal_policy_pref.integral(
-            world.government.enacted_policy)
-        self.well_being = sum(ol)
+        self.Pcp_Pge_ol = []
+        self.Pca_Pge_ol = []
+        self.Pci_Pge_ol = []
+        self.policy_government_integrals(world)
 
 
-    def build_response_to_well_being(self):
-        """Compute well-being and accumulate the
-        resulting engagement shifts.
+    def build_response_to_government(self):
+        """Set the well-being outcome measure and accumulate
+        the government-driven engagement response.
 
-        Well-being is computed from the overlap
-        between the citizen's IDEAL policy positions
-        (Pci — the objectively best policy for this
-        citizen, which they do not consciously know)
-        and the government's enacted policy (Pge).
-        A positive value means the government's
-        policy is objectively benefiting this
-        citizen; a negative value means it is
-        harming them.
+        The government affects engagement through the
+        citizen's CONSCIOUS (stated) policy positions
+        (DESIGN §8.6.2), in two opposing channels:
 
-        Note the key distinction: well-being is
-        based on IDEAL positions (Pci), not STATED
-        positions (Pcp). A citizen may feel
-        dissatisfied (stated pref far from Pge) yet
-        have high well-being (ideal pref close to
-        Pge), or vice versa. This captures the
-        reality that people don't always know what
-        policies actually benefit them.
+          Anger (engagement UP): when a stated aversion is
+            realized by the enacted policy. The overlap
+            I(Pca, Pge) is most negative when the hated
+            thing is being done, so -I(Pca, Pge) is the
+            positive anger signal. It touches an aversion,
+            so it carries the threat weight w.
 
-        The well-being scalar is then mapped to
-        engagement shifts via
-        _well_being_to_engagement(). This method is
-        encapsulated separately so that the richer
-        well-being model (DESIGN.md §8.5: resource,
-        perceived satisfaction, resentment) can
-        replace the mapping without restructuring
-        this call site.
+          Resignation (engagement DOWN): when a stated
+            preference goes unmet. Resignation grows as the
+            satisfaction overlap I(Pcp, Pge) falls below the
+            reference level sat_ref. It is subtracted from
+            the engagement drive, pushing theta toward
+            apathy, and is scaled by definedness so it bites
+            hardest on SHARP citizens — the well-informed
+            voter who knows what they want, sees it ignored,
+            and stops participating while keeping a sharp
+            opinion.
 
-        This method writes only to the engagement
-        shift arrays (orien_shift), not to the
-        citizen's Gaussians directly. The actual
-        application happens in apply_influence_shifts().
+        Both channels are scaled by govt_engagement_rate and
+        by the definedness d = sigma_floor/sigma of the
+        Gaussian being shifted. Government acts on policy
+        only, so the trait Gaussians are untouched here.
+
+        The well-being scalar is the OUTCOME measure
+        (DESIGN §8.5): the overlap between the citizen's
+        IDEAL policy (Pci — the objectively best policy,
+        which they do not consciously know) and Pge. It is
+        recorded for output but, unlike the conscious
+        overlaps above, no longer feeds engagement — a
+        citizen cannot perceive their own hidden ideal.
+
+        This method writes only to the engagement shift
+        arrays (orien_shift) and the well_being scalar, not
+        to the Gaussians directly; the theta update happens
+        in apply_engagement_shifts(). It runs every step in
+        BOTH phases, against the current Pge, with no stored
+        state — a change of government washes the old
+        response out.
         """
+        w = self.threat_weight
+        ger = self.govt_engagement_rate
+
+        # Outcome measure (recorded for output, not an
+        #   engagement input).
         self.well_being = sum(self.Pci_Pge_ol[0])
-        self._well_being_to_engagement()
+
+        # Definedness of the conscious policy Gaussians.
+        d_Pcp = self._definedness(self.stated_policy_pref)
+        d_Pca = self._definedness(self.stated_policy_aver)
+
+        # Anger: aversion realized -> engagement up. Carries
+        #   the threat weight (it touches an aversion).
+        anger = np.maximum(0.0, -self.Pca_Pge_ol[0])
+        self.Pca_orien_shift += ger * w * d_Pca * anger
+
+        # Resignation: preference unmet -> engagement down.
+        #   Subtracted so it drives theta toward apathy.
+        resignation = np.maximum(
+                0.0, self.sat_ref - self.Pcp_Pge_ol[0])
+        self.Pcp_orien_shift -= ger * d_Pcp * resignation
 
 
-    def _well_being_to_engagement(self):
-        """Map the well-being scalar to engagement
-        shifts for all four Gaussian types.
+    def reset_orientation_shifts(self, num_policy_dims,
+            num_trait_dims):
+        """Zero the four engagement (theta) shift arrays.
 
-        The core idea: |well_being| drives all
-        Gaussians toward their engaged poles.
-        Citizens doing very well (high positive
-        well-being) are engaged because the system
-        is working for them and they want to
-        preserve it. Citizens doing very poorly
-        (large negative) are engaged because they
-        are motivated to change things. Only
-        near-zero well-being (policy is neutral
-        to the citizen) provides no engagement
-        stimulus.
-
-        This follows the same "absolute value
-        drives engagement" principle used in
-        politician influence (where |overlap|
-        shifts theta toward real) and citizen
-        collective influence. Engagement is about
-        caring, not about approval.
-
-        The shift magnitude |well_being| is applied
-        uniformly across all policy and trait
-        dimensions. Well-being is a whole-citizen
-        state (derived from all policy dimensions
-        summed together), so it affects engagement
-        on ALL issues equally, not dimension by
-        dimension.
-
-        The actual theta modification happens later
-        in apply_influence_shifts(), where these
-        accumulated orien_shift values are
-        subtracted from preference Im(theta) (driving
-        it toward 0) or added to aversion Im(theta)
-        (driving it toward pi).
+        The campaign phase resets these inside
+        prepare_for_influence() (which also allocates the
+        position/spread accumulators). The govern phase has
+        no position/spread shifts, so it uses this lighter
+        reset before each step's government engagement
+        response (DESIGN §8.6).
         """
-        mag = abs(self.well_being)
-        n = self.num_policy_dims
-        m = self.num_trait_dims
-
-        self.Pcp_orien_shift += np.full(n, mag)
-        self.Pca_orien_shift += np.full(n, mag)
-        self.Tcp_orien_shift += np.full(m, mag)
-        self.Tca_orien_shift += np.full(m, mag)
+        n = num_policy_dims
+        m = num_trait_dims
+        self.Pcp_orien_shift = np.zeros(n)
+        self.Pca_orien_shift = np.zeros(n)
+        self.Tcp_orien_shift = np.zeros(m)
+        self.Tca_orien_shift = np.zeros(m)
 
 
     def score_candidates(self, world):

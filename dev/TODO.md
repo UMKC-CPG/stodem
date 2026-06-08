@@ -23,6 +23,26 @@ No pending items.
 
 ## DESIGN
 
+- [ ] **Refresh §8.0 master interaction matrix** (DESIGN
+  §8.0). The engagement redesign is implemented, but the
+  §8.0 quick-reference matrix still shows the superseded
+  pre-redesign engagement rows (1, 4–6, the self→citizen
+  decay cell, and the "structural properties" saturation
+  note). Rewrite those rows to match §8.2/§8.6.2/§8.6.6
+  (threat-weighted definedness-gated push, government
+  anger/resignation, spread-proportional fade, both phases)
+  and remove the temporary warning note at the top of §8.0.
+
+- [ ] **Community influence during governing** (DESIGN
+  §8.6, deferred; noted 2026-06-07). Let the citizen-
+  collective overlaps keep moving citizen policy
+  preferences and aversions through the governing phase,
+  not only during the campaign, so citizens continue to
+  drift toward neighbors' positions between elections.
+  Position-dynamics change touching §8.6.3–§8.6.4 and the
+  phase structure; tackle after the engagement redesign
+  lands.
+
 - [ ] **Stochastic election mechanism** (DESIGN §10.3, CODE
   `vote()`). The election is currently deterministic (top
   vote-getter wins). The core research question (VISION Goal 2)
@@ -75,6 +95,24 @@ No pending items.
 ---
 
 ## CODE
+
+- [ ] **No-overshoot position/spread shifts** (DESIGN
+  §8.6.3, §8.6.5; CODE `citizen.py`). DESIGN is written;
+  code pending. Cap each source's contribution at its gap
+  (`sign(gap)*min(speed, |gap|)`) and clamp each source's
+  accumulated movement to the span of the targets it used,
+  widened by the pre-move value. Requires splitting the mu
+  and sigma shift arrays into politician and community
+  sub-totals (§8.6.1) and tracking per-source target_lo/hi.
+
+- [ ] **Continuous intra-patch positions** (VISION
+  Principle 7, DESIGN §5.1). Give citizens and
+  politicians a real-valued (x,y) position inside their
+  current patch and wire `patch_size` (currently read
+  but unused) as the patch's continuous extent. Define
+  intra-patch movement (continuous) vs. patch-to-patch
+  movement (discrete). Decide how position interacts
+  with neighbor grouping and zone averages.
 
 - [ ] **Glyph verification re-run** (DESIGN §12.3).
   After the separate-files-per-grid-type redesign,
@@ -129,3 +167,5 @@ stable cross-references used throughout DESIGN.md.
 | 34 | Agreement/disagreement ratio unbounded | `politician.py` | Replaced with bounded `max(0, agreement + disagreement)` |
 | 35 | Debug viz — replay controls | `policy_space_viz.py` | Live display verified (2026-04-05); frame recording and post-run replay with transport controls (play, pause, reverse, scrub, speed adjust, keyboard shortcuts) implemented (2026-04-05) |
 | 36 | Debug viz — legend | `policy_space_viz.py` | Colour/style legend added to top-left policy subplot with four reference entries: blue (citizen pref/aver), green (ideal policy), red (politician ext), black (government enacted) (2026-04-05) |
+| 37 | Persuasion factor could be negative (random sign caused some politicians to repel citizens' positions and demobilize engagement) | `politician.py`, `citizen.py`, `stodem.in.toml`, `DESIGN.md` | Drawn as half-normal `np.abs(rng.normal(...))`; persuasion now a non-negative magnitude that only amplifies, never reverses (2026-06-06) |
+| 38 | Engagement redesign (replaced one-way ratchet + freezing proportional decay) | `citizen.py`, `stodem.py`, `stodem.in.toml`, `DESIGN.md`, `PSEUDOCODE.md`, `VISION.md` | Threat-weighted, definedness-gated push; government anger/resignation via `build_response_to_government()`; shared `apply_engagement_shifts()` with spread-proportional fade; engagement evolves every step in both phases; added `threat_weight`/`govt_engagement_rate`/`sat_ref`, re-interpreted `engagement_decay_rate`. Resolves former PINNED item and §8.6.9 Q2 (2026-06-07) |

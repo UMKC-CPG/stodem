@@ -86,8 +86,9 @@ initial_num_citizens = 3
 #   (theta): "imaginary" leans toward apathy, "uniform"
 #   spreads engagement evenly, "real" leans toward full
 #   engagement. The remaining values tune the interaction
-#   physics (collective influence, the sigma floor,
-#   engagement decay, and defensive response).
+#   physics (collective influence, the sigma floor, the
+#   engagement fade, defensive response, the threat weight,
+#   and the government anger/resignation response).
 [citizens]
 policy_pref_pos_stddev = 2.0
 policy_pref_stddev_stddev = 2.0
@@ -107,17 +108,37 @@ trait_aver_orien_stddev = "imaginary"
 policy_trait_ratio_stddev = 0.2
 collective_influence_rate = 1.0
 sigma_floor = 0.05
+# engagement_decay_rate: the steady fade toward apathy,
+#   measured as radians of theta moved per unit of spread
+#   per step (fade = engagement_decay_rate * sigma). DESIGN
+#   §8.6.6. (Re-interpreted from the old proportional decay.)
 engagement_decay_rate = 0.01
 defensive_ratio = 1.0
+# threat_weight (w): multiplier on every engagement term that
+#   touches an aversion — a threat or a shared opposition.
+#   Pure preference-preference agreement stays at 1. DESIGN
+#   §8.6.2/§8.6.8.
+threat_weight = 2.0
+# govt_engagement_rate: scale of the government-driven anger
+#   (up) and resignation (down) engagement response. Tunable
+#   placeholder — settle against a test run. DESIGN §8.6.8.
+govt_engagement_rate = 0.1
+# sat_ref: reference "fully satisfied" overlap level;
+#   resignation grows as overlap(Pcp, Pge) falls below it.
+#   Tunable placeholder — settle against a test run. DESIGN
+#   §8.6.8.
+sat_ref = 0.5
 
 # Politician initialization. Innate and external policy
 #   and trait positions are drawn with the given spreads.
 #   The persuasion and lie stddevs control how strongly a
 #   politician influences citizens and how far stated
-#   positions may diverge from innate ones. The cumulative
-#   strategy-probability lists are read as native arrays:
-#   each entry is a cumulative threshold used to pick a
-#   movement or adaptation strategy.
+#   positions may diverge from innate ones. Persuasion is a
+#   non-negative magnitude (drawn as a half-normal with this
+#   stddev): it only amplifies influence, never reverses it.
+#   The cumulative strategy-probability lists are read as
+#   native arrays: each entry is a cumulative threshold used
+#   to pick a movement or adaptation strategy.
 [politicians]
 policy_pref_pos_stddev = 2.0
 policy_pref_stddev_stddev = 2.0

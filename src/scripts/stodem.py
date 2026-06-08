@@ -102,9 +102,11 @@
 #   citizen can have a stated preference that is inconsistent with the
 #   ideal position for the citizen. (Indirect in the sense that a
 #   "well-being" is computed based on a comparison of the ideal policy
-#   positions and the government's enacted policies. The "well-being"
-#   affects the citizen's engagement, tendency to believe politicians,
-#   etc.)
+#   positions and the government's enacted policies. Well-being is the
+#   objective OUTCOME measure of the simulation; the citizen does not
+#   perceive it, so it no longer drives engagement directly — the
+#   conscious stated overlaps with the government do that, via anger
+#   and resignation. See DESIGN §8.6.2.)
 
 # In any case...
 
@@ -128,11 +130,14 @@
 #   with other citizens.
 
 # The ideal policy positions are, on the other hand, a bit different.
-#   They are compared to the government policy positions during the
-#   governing phase to compute the citizen's actual well-being. The
-#   measure of well-being is used modulate the political temperature of
-#   the citizen. Within this dynamic, a variety of phenomena may occur.
-#   (See below.) Note, that all ideal policy positions are positive.
+#   They are compared to the government policy positions during both the
+#   campaign and governing phases to compute the citizen's actual
+#   well-being — the objective outcome measure of the simulation. Unlike
+#   the conscious stated overlaps, this ideal-based well-being is not
+#   perceived by the citizen and does not modulate their engagement; it
+#   is recorded as the result the simulation studies. Within the broader
+#   dynamic a variety of phenomena may occur. (See below.) Note that all
+#   ideal policy positions are positive.
 
 # In addition to the policy dimensions, there are also personality trait
 #   dimensions. Each citizen maintains two Gaussians for each personality
@@ -291,18 +296,34 @@
 #     a targeted aversion to the disliked source's specific policies.
 #
 # ---------------------------------------------------------------------------
-# Engagement decay
+# Engagement dynamics (DESIGN §8.2, §8.6.2, §8.6.6)
 # ---------------------------------------------------------------------------
 #
-# Engagement naturally decreases without external stimulus. Each
-#   simulation step, every citizen's theta for every Gaussian drifts
-#   toward pi/2 (fully imaginary / fully apathetic) by a constant
-#   amount set by an engagement_decay_rate parameter. Without active
-#   campaigning or citizen-citizen interaction, citizens gradually
-#   disengage from all issues. This creates a fundamental tension:
-#   campaigns must actively maintain engagement, not just create it once.
-#   The decay rate is stored as a variable so that it can be made
-#   dynamic in the future (e.g., modulated by well-being).
+# Engagement (the angle theta of each Gaussian) both rises and falls,
+#   every step, in BOTH the campaign and the govern phase. Three forces
+#   act on it:
+#
+#   Upward push: each |overlap| with a politician or the community drives
+#     theta toward the engaged pole. Two refinements shape it — a threat
+#     weight (any term touching an aversion counts ~2x, since shared
+#     opposition and direct threat mobilize harder than agreement) and a
+#     definedness gate (the push is scaled by sigma_floor/sigma, so sharp
+#     views rouse easily and vague ones barely move).
+#
+#   Government push: the enacted policy drives engagement through the
+#     citizen's CONSCIOUS positions — anger (engagement up) when a stated
+#     aversion is enacted, resignation (engagement down) when a stated
+#     preference goes unmet. This lets a sharp, well-informed citizen
+#     disengage out of hopelessness while keeping their opinion intact.
+#
+#   Fade: a steady pull back toward apathy proportional to the Gaussian's
+#     own spread (fade = engagement_decay_rate * sigma). Because sigma is
+#     floored, everyone fades a little every step, so no one freezes at
+#     full engagement; sharp views hold engagement while broad ones lapse.
+#
+# Together these leave a stable fraction of vague, neglected citizens
+#   resting near apathy without per-citizen tuning. Campaigns must keep
+#   actively re-engaging citizens, not just engage them once.
 #
 # ---------------------------------------------------------------------------
 # Voting phase
@@ -321,8 +342,9 @@
 #   engaged across many issues and is very likely to vote. A citizen
 #   whose Gaussians are mostly imaginary (theta near pi/2) is disengaged
 #   and unlikely to vote. This emerges naturally from the engagement
-#   mechanics: campaigns and citizen-citizen interactions drive theta
-#   toward real, while engagement decay drives theta toward imaginary.
+#   mechanics: campaigns, citizen-citizen interactions, and government
+#   anger drive theta toward real, while resignation and the spread-
+#   proportional fade drive theta toward imaginary.
 #
 #   Future extension: A discriminability term could be included. If a
 #   citizen's top candidate score is barely above the second-best, the
@@ -377,8 +399,13 @@
 #   who aligns with your preferences will make you engage in support.
 #   Weak overlap leads to weak engagement change.
 #
-#   The politician's policy_persuasion and trait_persuasion
-#   parameters scale the magnitude of these engagement shifts.
+#   The politician's policy_persuasion and trait_persuasion parameters
+#   scale the magnitude of these engagement shifts. Two further factors
+#   apply (DESIGN §8.6.2): every aversion-touching term is multiplied by
+#   the threat_weight (only pure pref-pref agreement, Pcp-Ppp and
+#   Tcp-Tpx, stays at weight 1), and each contribution is scaled by the
+#   definedness sigma_floor/sigma of the citizen Gaussian being shifted,
+#   so sharply held views are roused far more readily than vague ones.
 #
 # --- Politician-driven citizen policy position and spread shifts ---
 #
@@ -453,16 +480,32 @@
 # Citizen-citizen overlap integrals also affect engagement, following
 #   the same rule as politician-driven engagement: the absolute value
 #   of each citizen-citizen overlap integral shifts the corresponding
-#   citizen Gaussian's theta toward real. Citizens who are surrounded
-#   by others with strong (agreeing or disagreeing) positions on an
-#   issue will become more engaged with that issue.
+#   citizen Gaussian's theta toward real, scaled by the same threat
+#   weight and definedness factors (DESIGN §8.6.2). Citizens who are
+#   surrounded by others with strong (agreeing or disagreeing) positions
+#   on an issue will become more engaged with that issue.
+#
+# --- Government-driven citizen engagement (anger / resignation) ---
+#
+# The enacted policy drives engagement through the citizen's conscious
+#   (stated) policy positions, applied every step in BOTH phases. The
+#   overlap I(Pca, Pge) is most negative when a stated aversion is being
+#   enacted, so -I(Pca, Pge) is a positive ANGER signal that raises
+#   engagement (and carries the threat weight). The satisfaction overlap
+#   I(Pcp, Pge) falling below a reference level sat_ref is RESIGNATION,
+#   which lowers engagement and, being definedness-scaled, bites hardest
+#   on sharp citizens. Both are scaled by govt_engagement_rate. The
+#   objective well-being measure (ideal Pci vs Pge) is recorded for
+#   output but no longer feeds engagement (citizens cannot perceive
+#   their hidden ideal).
 #
 # ---------------------------------------------------------------------------
 # Governing phase (to be elaborated)
 # ---------------------------------------------------------------------------
 #
 # The governing phase updates the government's enacted policy based on
-#   elected politicians and computes citizen well-being.
+#   elected politicians, recomputes citizen well-being, and continues to
+#   evolve engagement (government anger/resignation plus the fade).
 #
 # ===========================================================================
 # Well-being, resource, and resentment — WORK IN PROGRESS
@@ -700,11 +743,14 @@ def campaign(sim_control, settings, world,
             citizen.build_response_to_politician_influence()
         print ("built response to influence")
 
-        # - Citizens modify their personality and policy positions under
-        #   the influence of their well_being.
+        # - Citizens record their well-being (the ideal-vs-
+        #   enacted outcome measure) and accumulate the
+        #   government-driven engagement response: anger when
+        #   a stated aversion is enacted, resignation when a
+        #   stated preference goes unmet (DESIGN §8.6.2).
         for citizen in world.citizens:
-            citizen.build_response_to_well_being()
-        print ("built response to well being")
+            citizen.build_response_to_government()
+        print ("built response to government")
 
         # - Citizens modify their personality and policy positions under
         #   the influence of their fellow citizens.
@@ -724,9 +770,11 @@ def campaign(sim_control, settings, world,
         #   the three accumulation calls does not affect the
         #   outcome — every source saw the same citizen
         #   state at the top of this step (DESIGN.md §8.6).
-        #   Engagement decay is also applied here, so that
+        #   The engagement update (net theta shift plus the
+        #   spread-proportional fade toward apathy) is also
+        #   applied here via apply_engagement_shifts(), so
         #   citizens who were not reached by any politician
-        #   or collective pressure drift back toward apathy.
+        #   or collective pressure still fade toward apathy.
         #   Finally, derived variables cached inside each
         #   Gaussian (alpha, cos_theta, self_norm) are
         #   refreshed so that the next step's overlap
@@ -921,15 +969,19 @@ def govern(sim_control, world, hdf5,
        innate preference sigma and away from their
        innate aversion sigma.
 
-    4. WELL-BEING OUTPUT (each govern step):
-       After forces are applied, Pge's cached
-       integration variables are refreshed and
-       each citizen's well-being is recomputed
-       from the updated Pci-vs-Pge overlap (via
-       citizen.recompute_well_being()). The
+    4. ENGAGEMENT AND WELL-BEING (each govern step):
+       After forces are applied and Pge's cached
+       integration variables are refreshed, each
+       citizen recomputes its government overlaps
+       against the moved Pge, then engagement is
+       updated the same way as in the campaign — the
+       government anger/resignation response plus the
+       spread-proportional fade (DESIGN §8.6). The
+       same pass records each citizen's well-being
+       (the ideal-vs-enacted outcome measure); the
        per-patch average is written to HDF5 so
-       ParaView can show well-being evolving as
-       government policy shifts.
+       ParaView can show well-being and engagement
+       evolving as government policy shifts.
 
     5. NATURAL SPREAD (once per cycle):
        After all govern steps complete, Pge.sigma
@@ -1036,12 +1088,29 @@ def govern(sim_control, world, hdf5,
                 f"(G) Cycle {cycle}"
                 f"  Step {step}")
 
-        # Recompute citizen well-being from the
-        #   updated Pge and write to HDF5. This
-        #   lets ParaView show how well-being
-        #   evolves as government policy shifts.
+        # Engagement evolves every step in the govern
+        #   phase too (DESIGN §8.6). For each citizen:
+        #   (1) recompute the citizen-vs-government
+        #   overlaps against the just-moved Pge — all
+        #   three (Pcp, Pca, Pci vs Pge) must be
+        #   refreshed; (2) reset the engagement (theta)
+        #   shift arrays; (3) accumulate the government
+        #   anger/resignation response (also sets the
+        #   well-being outcome measure for output); and
+        #   (4) apply the engagement update — the net
+        #   theta shift plus the spread-proportional
+        #   fade. No politician or community sources act
+        #   during governing — only the government and
+        #   the fade. The well-being values written to
+        #   HDF5 let ParaView show how well-being and
+        #   engagement evolve as policy shifts.
         for citizen in world.citizens:
-            citizen.recompute_well_being(world)
+            citizen.recompute_government_overlaps(world)
+            citizen.reset_orientation_shifts(
+                world.num_policy_dims,
+                world.num_trait_dims)
+            citizen.build_response_to_government()
+            citizen.apply_engagement_shifts()
         world.compute_patch_well_being()
         world.compute_patch_gaussian_stats()
         world.compute_patch_politician_stats()
@@ -1162,9 +1231,15 @@ def main():
     # Select sample citizens for diagnostic
     #   tracking: first, middle, and last in
     #   the global list (geographic spread).
+    #   Deduplicate while preserving order so
+    #   that very small worlds (where these
+    #   indices coincide, e.g. a single-citizen
+    #   world) track each distinct citizen once
+    #   instead of logging one citizen several
+    #   times under different column prefixes.
     n_cit = len(world.citizens)
-    sample_idx = [
-        0, n_cit // 2, n_cit - 1]
+    sample_idx = list(dict.fromkeys(
+        [0, n_cit // 2, n_cit - 1]))
     diag = Diagnostics(
         settings, world, sample_idx)
     print ("Diagnostics Initialized")
