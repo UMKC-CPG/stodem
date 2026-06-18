@@ -114,20 +114,40 @@ sigma_floor = 0.05
 #   §8.6.6. (Re-interpreted from the old proportional decay.)
 engagement_decay_rate = 0.01
 defensive_ratio = 1.0
-# threat_weight (w): multiplier on every engagement term that
-#   touches an aversion — a threat or a shared opposition.
-#   Pure preference-preference agreement stays at 1. DESIGN
-#   §8.6.2/§8.6.8.
-threat_weight = 2.0
-# govt_engagement_rate: scale of the government-driven anger
-#   (up) and resignation (down) engagement response. Tunable
-#   placeholder — settle against a test run. DESIGN §8.6.8.
-govt_engagement_rate = 0.1
-# sat_ref: reference "fully satisfied" overlap level;
-#   resignation grows as overlap(Pcp, Pge) falls below it.
-#   Tunable placeholder — settle against a test run. DESIGN
-#   §8.6.8.
-sat_ref = 0.5
+# Government-engagement constants (DESIGN §8.6.2/§8.6.8). Each
+#   is drawn PER CITIZEN from a normal distribution, given here
+#   as a (center, spread) pair; spread = 0 recovers a single
+#   shared constant. Centers and spreads are tuning seeds —
+#   settle them against a test run.
+
+# negativity_bias (w): multiplier on every engagement term that
+#   touches an aversion (opposition mobilizes more than
+#   agreement). Pure preference-preference agreement stays at 1;
+#   floored at 1.0 so it never inverts.
+negativity_bias_center = 2.0
+negativity_bias_spread = 0.3
+
+# govt_engagement_scale: overall magnitude of the two
+#   government engagement channels. Kept non-negative.
+govt_engagement_scale_center = 0.1
+govt_engagement_scale_spread = 0.03
+
+# aversion-match channel (engagement up): logistic sigmoid of
+#   -I(Pca, Pge). Its midpoint is this fraction of the band
+#   ceiling A_max (in (0,1), centered 0.5); the steepness sets
+#   how sharply it switches (sizeable, since the band is narrow).
+aversion_match_midpoint_frac_center = 0.5
+aversion_match_midpoint_frac_spread = 0.15
+aversion_match_steepness_center = 10.0
+aversion_match_steepness_spread = 2.0
+
+# preference-gap channel (engagement down): logistic sigmoid of
+#   how far preference_alignment = I(Pcp, Pge) falls below its
+#   midpoint (also a fraction of A_max).
+preference_gap_midpoint_frac_center = 0.5
+preference_gap_midpoint_frac_spread = 0.15
+preference_gap_steepness_center = 10.0
+preference_gap_steepness_spread = 2.0
 
 # Politician initialization. Innate and external policy
 #   and trait positions are drawn with the given spreads.

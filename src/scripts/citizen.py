@@ -1,7 +1,36 @@
 import numpy as np
 
-from gaussian import Gaussian, sample_theta
+from gaussian import (Gaussian, sample_theta,
+                      matched_self_overlap)
 from random_state import rng
+
+
+def _logistic(z):
+    """Numerically stable logistic sigmoid 1/(1+exp(-z)).
+
+    Written via tanh so large-magnitude arguments do not
+    overflow: 1/(1+exp(-z)) = (1 + tanh(z/2)) / 2. Returns a
+    value in (0, 1) for any real z (DESIGN §8.6.2).
+    """
+    return 0.5 * (1.0 + np.tanh(0.5 * z))
+
+
+def _draw_per_citizen(center, spread, low=None, high=None):
+    """Draw one per-citizen scalar from N(center, spread),
+    clamped to [low, high] when those bounds are given.
+
+    Used for the randomized engagement constants (DESIGN
+    §8.6.8). A spread of 0 returns the center exactly, which
+    recovers a single shared constant for the whole
+    population. The draw uses the shared rng so runs stay
+    reproducible.
+    """
+    value = rng.normal(loc=center, scale=spread)
+    if low is not None:
+        value = max(value, low)
+    if high is not None:
+        value = min(value, high)
+    return float(value)
 
 
 class DirectionalShift():
@@ -193,8 +222,10 @@ class Citizen():
             (stated pref, stated aver)
           - Scalar parameters: policy_trait_ratio,
             collective_influence_rate, sigma_floor,
-            engagement_decay_rate, defensive_ratio,
-            threat_weight, govt_engagement_rate, sat_ref
+            engagement_decay_rate, defensive_ratio, and the
+            per-citizen engagement draws negativity_bias,
+            govt_engagement_scale, the two midpoint
+            fractions, and the two steepnesses
           - A patch assignment and zone membership
 
         Parameters
@@ -355,31 +386,60 @@ class Citizen():
         self.engagement_decay_rate = (
                 cit["engagement_decay_rate"])
 
-        # threat_weight (w) is the multiplier applied to
-        #   every engagement contribution that involves an
-        #   aversion Gaussian — a direct threat or a shared
-        #   opposition (DESIGN §8.6.2). Pure preference-meets-
-        #   preference agreement counts at weight 1; every
-        #   aversion-touching term counts at w. A shared
-        #   enemy or a direct threat mobilizes harder than
-        #   shared enthusiasm, so w is typically about 2.
-        self.threat_weight = cit["threat_weight"]
+        # The government-engagement constants (DESIGN §8.6.8)
+        #   are drawn PER CITIZEN from N(center, spread) via
+        #   the shared rng, so the population is heterogeneous
+        #   rather than sharing one magic number. Each reads a
+        #   (center, spread) pair from the TOML; a spread of 0
+        #   recovers a single shared constant.
 
-        # govt_engagement_rate scales the government-driven
-        #   engagement response (DESIGN §8.6.2): anger when a
-        #   stated aversion is enacted (engagement up) and
-        #   resignation when a stated preference goes unmet
-        #   (engagement down). Applied every step in both the
-        #   campaign and govern phases. Tunable; see §8.6.8.
-        self.govt_engagement_rate = (
-                cit["govt_engagement_rate"])
+        # negativity_bias (w) multiplies every engagement term
+        #   that touches an aversion (DESIGN §8.6.2): pure
+        #   preference-meets-preference agreement counts at 1,
+        #   every aversion-touching term at w. Opposition
+        #   mobilizes more than agreement, so w centers near 2;
+        #   floored at 1.0 so a draw never inverts the bias.
+        self.negativity_bias = _draw_per_citizen(
+                cit["negativity_bias_center"],
+                cit["negativity_bias_spread"], low=1.0)
 
-        # sat_ref is the reference "fully satisfied" overlap
-        #   level for resignation (DESIGN §8.6.2): resignation
-        #   grows as the conscious satisfaction overlap
-        #   I(Pcp, Pge) falls below sat_ref. Set near the
-        #   matched-policy self-overlap. Tunable; see §8.6.8.
-        self.sat_ref = cit["sat_ref"]
+        # govt_engagement_scale sets the overall magnitude of
+        #   the two government engagement channels (DESIGN
+        #   §8.6.2), applied every step in both phases. Kept
+        #   non-negative.
+        self.govt_engagement_scale = _draw_per_citizen(
+                cit["govt_engagement_scale_center"],
+                cit["govt_engagement_scale_spread"], low=0.0)
+
+        # The aversion-match channel (engagement up) is a
+        #   logistic sigmoid of -I(Pca, Pge). Its midpoint is
+        #   a FRACTION of A_max (the matched-policy
+        #   self-overlap band ceiling), kept in (0, 1) and
+        #   centered 0.5 so the half-response point sits inside
+        #   the band; the steepness sets how sharply it
+        #   switches (DESIGN §8.6.2).
+        self.aversion_match_midpoint_frac = _draw_per_citizen(
+                cit["aversion_match_midpoint_frac_center"],
+                cit["aversion_match_midpoint_frac_spread"],
+                low=0.0, high=1.0)
+        self.aversion_match_steepness = _draw_per_citizen(
+                cit["aversion_match_steepness_center"],
+                cit["aversion_match_steepness_spread"],
+                low=0.0)
+
+        # The preference-gap channel (engagement down) is a
+        #   logistic sigmoid of the shortfall of
+        #   preference_alignment = I(Pcp, Pge) below its
+        #   midpoint, also a fraction of A_max (DESIGN
+        #   §8.6.2, §8.6.8).
+        self.preference_gap_midpoint_frac = _draw_per_citizen(
+                cit["preference_gap_midpoint_frac_center"],
+                cit["preference_gap_midpoint_frac_spread"],
+                low=0.0, high=1.0)
+        self.preference_gap_steepness = _draw_per_citizen(
+                cit["preference_gap_steepness_center"],
+                cit["preference_gap_steepness_spread"],
+                low=0.0)
 
         # defensive_ratio scales the targeted backlash response
         #   when a citizen dislikes a politician (negative trait
@@ -616,6 +676,13 @@ class Citizen():
         self.Pci_Pge_ol.append(self.ideal_policy_pref.integral(
                 world.government.enacted_policy))
 
+        # Cache the enacted-policy spread for the government
+        #   engagement channels' band ceilings A_max, which
+        #   build_response_to_government() recomputes each step
+        #   from the current spreads (DESIGN §8.6.2). Per
+        #   policy dimension.
+        self.Pge_sigma = world.government.enacted_policy.sigma
+
 
     def prepare_for_influence(self, num_policy_dims, num_trait_dims):
         # Per DESIGN.md §8.6.1: twelve separate shift arrays, three
@@ -775,11 +842,11 @@ class Citizen():
             #   is scaled two ways: by the definedness
             #   d = sigma_floor/sigma of the Gaussian being
             #   shifted (sharp views rouse easily, vague ones
-            #   barely move) and by the threat weight w on
+            #   barely move) and by the negativity bias w on
             #   every term that touches an aversion. Only the
             #   pure preference-meets-preference terms
             #   (Pcp-Ppp and Tcp-Tpx) escape w.
-            w = self.threat_weight
+            w = self.negativity_bias
             d_Pcp = self._definedness(self.stated_policy_pref)
             d_Pca = self._definedness(self.stated_policy_aver)
             d_Tcp = self._definedness(self.stated_trait_pref)
@@ -907,12 +974,12 @@ class Citizen():
             * (1.0 - np.abs(
                 self.stated_trait_aver.cos_theta)))
 
-        # Threat weight and definedness for the engagement
+        # Negativity bias and definedness for the engagement
         #   push, the same rule as politician influence
         #   (DESIGN §8.6.2). d = sigma_floor/sigma scales the
         #   push by how sharply each view is held; w weights
         #   every aversion-touching term.
-        w = self.threat_weight
+        w = self.negativity_bias
         d_Pcp = self._definedness(self.stated_policy_pref)
         d_Pca = self._definedness(self.stated_policy_aver)
         d_Tcp = self._definedness(self.stated_trait_pref)
@@ -922,10 +989,10 @@ class Citizen():
 
             # --- Engagement shifts (DESIGN §8.6.2) ---
             # |overlap| drives theta toward the engaged pole,
-            #   scaled by definedness d and threat weight w.
+            #   scaled by definedness d and negativity bias w.
             #   Cross-terms (pref×aver) carry w: both agreement
             #   and shared/opposed stances raise engagement on
-            #   community-relevant issues, threats more so.
+            #   community-relevant issues, opposition more so.
             self.Pcp_orien_shift += cir * d_Pcp * (
                 np.abs(self.Pcp_Pcp_ol[zone_idx])
                 + w * np.abs(self.Pcp_Pca_ol[zone_idx]))
@@ -1117,9 +1184,10 @@ class Citizen():
         #     the fade subtracts back toward pi/2.
         #
         # theta_shift is the NET drive: most sources add to it
-        #   (toward engaged), while government resignation
-        #   subtracts from it (toward apathy), so the net value
-        #   may be positive or negative.
+        #   (toward engaged), while the government
+        #   preference-gap drive subtracts from it (toward
+        #   apathy), so the net value may be positive or
+        #   negative.
         #
         # The fade (DESIGN §8.6.6) is proportional to each
         #   Gaussian's own spread: fade = engagement_decay_rate *
@@ -1198,30 +1266,37 @@ class Citizen():
 
         The government affects engagement through the
         citizen's CONSCIOUS (stated) policy positions
-        (DESIGN §8.6.2), in two opposing channels:
+        (DESIGN §8.6.2), via two opposing logistic-sigmoid
+        channels:
 
-          Anger (engagement UP): when a stated aversion is
-            realized by the enacted policy. The overlap
-            I(Pca, Pge) is most negative when the hated
-            thing is being done, so -I(Pca, Pge) is the
-            positive anger signal. It touches an aversion,
-            so it carries the threat weight w.
+          Aversion-match (engagement UP): when a stated
+            aversion is realized by the enacted policy. The
+            overlap I(Pca, Pge) is most negative when the
+            opposed thing is being done, so -I(Pca, Pge) is
+            the positive driver. It touches an aversion, so
+            it carries the negativity bias w.
 
-          Resignation (engagement DOWN): when a stated
-            preference goes unmet. Resignation grows as the
-            satisfaction overlap I(Pcp, Pge) falls below the
-            reference level sat_ref. It is subtracted from
-            the engagement drive, pushing theta toward
+          Preference-gap (engagement DOWN): when a stated
+            preference goes unmet. The driver is the
+            shortfall of preference_alignment = I(Pcp, Pge)
+            below this channel's midpoint. It is subtracted
+            from the engagement drive, pushing theta toward
             apathy, and is scaled by definedness so it bites
             hardest on SHARP citizens — the well-informed
             voter who knows what they want, sees it ignored,
             and stops participating while keeping a sharp
             opinion.
 
-        Both channels are scaled by govt_engagement_rate and
-        by the definedness d = sigma_floor/sigma of the
-        Gaussian being shifted. Government acts on policy
-        only, so the trait Gaussians are untouched here.
+        Each channel is a logistic sigmoid of its driver. The
+        midpoint is a per-citizen fraction of A_max — the
+        matched-policy self-overlap that tops the channel's
+        signal band — recomputed each step from the current
+        spreads so the half-response point stays inside
+        (0, A_max]. Both channels are scaled by
+        govt_engagement_scale and by the definedness
+        d = sigma_floor/sigma of the Gaussian being shifted.
+        Government acts on policy only, so the trait Gaussians
+        are untouched here.
 
         The well-being scalar is the OUTCOME measure
         (DESIGN §8.5): the overlap between the citizen's
@@ -1239,8 +1314,8 @@ class Citizen():
         state — a change of government washes the old
         response out.
         """
-        w = self.threat_weight
-        ger = self.govt_engagement_rate
+        w = self.negativity_bias
+        ges = self.govt_engagement_scale
 
         # Outcome measure (recorded for output, not an
         #   engagement input).
@@ -1250,16 +1325,42 @@ class Citizen():
         d_Pcp = self._definedness(self.stated_policy_pref)
         d_Pca = self._definedness(self.stated_policy_aver)
 
-        # Anger: aversion realized -> engagement up. Carries
-        #   the threat weight (it touches an aversion).
-        anger = np.maximum(0.0, -self.Pca_Pge_ol[0])
-        self.Pca_orien_shift += ger * w * d_Pca * anger
+        # Band ceilings A_max (matched-policy self-overlap),
+        #   per policy dim. Depend only on the spreads, so
+        #   they are recomputed each step from current sigmas.
+        aver_band_ceiling = matched_self_overlap(
+                self.stated_policy_aver.sigma, self.Pge_sigma)
+        pref_band_ceiling = matched_self_overlap(
+                self.stated_policy_pref.sigma, self.Pge_sigma)
 
-        # Resignation: preference unmet -> engagement down.
+        # Midpoints = per-citizen fraction of each ceiling, so
+        #   the half-response point stays inside (0, A_max].
+        aver_midpoint = (
+                self.aversion_match_midpoint_frac
+                * aver_band_ceiling)
+        pref_midpoint = (
+                self.preference_gap_midpoint_frac
+                * pref_band_ceiling)
+
+        # Aversion-match channel: aversion realized -> up.
+        #   Carries the negativity bias (it touches an
+        #   aversion). Logistic of the realized aversion
+        #   signal -I(Pca, Pge) past its midpoint.
+        aversion_match_drive = _logistic(
+                self.aversion_match_steepness
+                * (-self.Pca_Pge_ol[0] - aver_midpoint))
+        self.Pca_orien_shift += (
+                ges * w * d_Pca * aversion_match_drive)
+
+        # Preference-gap channel: preference unmet -> down.
         #   Subtracted so it drives theta toward apathy.
-        resignation = np.maximum(
-                0.0, self.sat_ref - self.Pcp_Pge_ol[0])
-        self.Pcp_orien_shift -= ger * d_Pcp * resignation
+        #   Logistic of how far preference_alignment falls
+        #   below its midpoint.
+        preference_gap_drive = _logistic(
+                self.preference_gap_steepness
+                * (pref_midpoint - self.Pcp_Pge_ol[0]))
+        self.Pcp_orien_shift -= (
+                ges * d_Pcp * preference_gap_drive)
 
 
     def reset_orientation_shifts(self, num_policy_dims,

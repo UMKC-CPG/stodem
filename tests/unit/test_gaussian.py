@@ -15,7 +15,8 @@ class TestGaussianCreation:
         g = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0j]))
+            np.array([0.0 + 0j]),
+            1)
         assert g.mu[0] == 0.0
         assert g.sigma[0] == 1.0
 
@@ -25,7 +26,8 @@ class TestGaussianCreation:
         g = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0j]))
+            np.array([0.0 + 0j]),
+            1)
         g.update_integration_variables()
         assert np.isclose(g.alpha[0], 0.5)
         assert np.isclose(g.cos_theta[0], 1.0)
@@ -40,22 +42,27 @@ class TestOverlapIntegral:
         g = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0j]))
+            np.array([0.0 + 0j]),
+            1)
         g.update_integration_variables()
         ol = g.integral(g)
         assert np.isclose(ol[0], 1.0, atol=0.01)
 
-    def test_self_overlap_apathetic(self):
-        """Self-overlap of a fully apathetic Gaussian
-        should be close to 0."""
-        theta = np.array([0.0 + (np.pi / 2) * 1j])
+    def test_self_overlap_engagement_independent(self):
+        """Normalized self-overlap is 1.0 regardless of
+        engagement: the cos(theta) magnitude cancels in the
+        normalization, so even a near-apathetic Gaussian
+        overlaps itself perfectly. (Engagement affects the
+        vote probability, not the normalized overlap.)"""
+        theta = np.array([0.0 + (np.pi / 2 - 0.1) * 1j])
         g = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            theta)
+            theta,
+            1)
         g.update_integration_variables()
         ol = g.integral(g)
-        assert np.isclose(ol[0], 0.0, atol=0.01)
+        assert np.isclose(ol[0], 1.0, atol=0.01)
 
     def test_distant_gaussians_weak_overlap(self):
         """Two Gaussians far apart should have near-
@@ -63,11 +70,13 @@ class TestOverlapIntegral:
         g1 = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0j]))
+            np.array([0.0 + 0j]),
+            1)
         g2 = Gaussian(
             np.array([100.0]),
             np.array([1.0]),
-            np.array([0.0 + 0j]))
+            np.array([0.0 + 0j]),
+            1)
         g1.update_integration_variables()
         g2.update_integration_variables()
         ol = g1.integral(g2)
@@ -78,11 +87,13 @@ class TestOverlapIntegral:
         g1 = Gaussian(
             np.array([0.5]),
             np.array([1.0]),
-            np.array([0.0 + 0.3j]))
+            np.array([0.0 + 0.3j]),
+            1)
         g2 = Gaussian(
             np.array([-0.5]),
             np.array([1.5]),
-            np.array([0.0 + 0.1j]))
+            np.array([0.0 + 0.1j]),
+            1)
         g1.update_integration_variables()
         g2.update_integration_variables()
         assert np.isclose(

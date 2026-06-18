@@ -329,3 +329,43 @@ class Gaussian():
         self.mu /= total_count
         self.sigma /= total_count
         self.theta /= total_count
+
+
+def matched_self_overlap(sigma_one, sigma_two):
+    """Return the band-ceiling overlap A_max: the magnitude of
+    the normalized overlap between two 1-D Gaussians whose
+    positions coincide (separation d = 0).
+
+    This is the largest overlap an enacted policy can reach
+    against a citizen Gaussian — the ceiling of the government
+    engagement channels' signal band (DESIGN §8.6.2). Setting
+    d = 0 in the integral() formula and cancelling the
+    engagement (cos theta) factors against the self-norms
+    leaves a value that depends ONLY on the two spreads:
+
+        zeta  = 1/(2*sigma_one^2) + 1/(2*sigma_two^2)
+        A_max = (pi/zeta)^0.5
+                / ( (pi*sigma_one^2)^0.25
+                    * (pi*sigma_two^2)^0.25 )
+
+    Because the cos theta factors drop out, A_max is cheap to
+    recompute every step from the current sigmas. It equals 1
+    only when the two spreads match; otherwise it is below 1.
+    Operates element-wise on per-dimension sigma arrays.
+
+    Parameters
+    ----------
+    sigma_one, sigma_two : np.ndarray
+        Per-dimension spreads of the two Gaussians.
+
+    Returns
+    -------
+    np.ndarray
+        Per-dimension band ceiling A_max (positive).
+    """
+    alpha_one = 0.5 / sigma_one**2
+    alpha_two = 0.5 / sigma_two**2
+    zeta = alpha_one + alpha_two
+    self_norm_one = (np.pi * sigma_one**2)**0.25
+    self_norm_two = (np.pi * sigma_two**2)**0.25
+    return (np.pi / zeta)**0.5 / (self_norm_one * self_norm_two)

@@ -17,7 +17,8 @@ class TestSignConvention:
         g = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0.3j]))
+            np.array([0.0 + 0.3j]),
+            1)
         g.update_integration_variables()
         assert g.cos_theta[0] > 0
 
@@ -27,7 +28,8 @@ class TestSignConvention:
         g = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            theta)
+            theta,
+            1)
         g.update_integration_variables()
         assert g.cos_theta[0] < 0
 
@@ -37,11 +39,13 @@ class TestSignConvention:
         g1 = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0.2j]))
+            np.array([0.0 + 0.2j]),
+            1)
         g2 = Gaussian(
             np.array([0.5]),
             np.array([1.0]),
-            np.array([0.0 + 0.4j]))
+            np.array([0.0 + 0.4j]),
+            1)
         g1.update_integration_variables()
         g2.update_integration_variables()
         ol = g1.integral(g2)
@@ -53,11 +57,13 @@ class TestSignConvention:
         pref = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + 0.2j]))
+            np.array([0.0 + 0.2j]),
+            1)
         aver = Gaussian(
             np.array([0.0]),
             np.array([1.0]),
-            np.array([0.0 + (np.pi - 0.2) * 1j]))
+            np.array([0.0 + (np.pi - 0.2) * 1j]),
+            1)
         pref.update_integration_variables()
         aver.update_integration_variables()
         ol = pref.integral(aver)

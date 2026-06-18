@@ -86,9 +86,10 @@ function campaign(sim, settings, world, hdf5, glyph,
         for each citizen in world:
             citizen.build_response_to_politician_influence()
 
-        # 7. Accumulate government-driven engagement (anger
-        #    up, resignation down) and record the well-being
-        #    outcome measure — DESIGN §8.6.2. (The overlaps
+        # 7. Accumulate government-driven engagement
+        #    (aversion-match up, preference-gap down) and
+        #    record the well-being outcome measure —
+        #    DESIGN §8.6.2. (The overlaps
         #    were already computed in step 4.)
         for each citizen in world:
             citizen.build_response_to_government()
@@ -185,9 +186,9 @@ function build_response_to_politician_influence(citizen):
         # |overlap| drives theta toward the engaged pole,
         #   scaled by definedness d = min(1, sigma_floor/sigma)
         #   and
-        #   by threat weight w on each term that touches an
-        #   aversion. Pure pref-pref agreement stays at 1.
-        w     = threat_weight
+        #   by negativity_bias w on each term that touches
+        #   an aversion. Pure pref-pref agreement stays at 1.
+        w     = negativity_bias
         d_Pcp = sigma_floor / Pcp.sigma
         d_Pca = sigma_floor / Pca.sigma
         d_Tcp = sigma_floor / Tcp.sigma
@@ -241,9 +242,9 @@ function build_response_to_citizen_collective(citizen):
 
     for each zone in citizen.zone_list:
 
-        # --- Engagement shifts (definedness d + threat w,
+        # --- Engagement shifts (definedness d + bias w,
         #     same rule as politician push, DESIGN §8.6.2) ---
-        w     = threat_weight
+        w     = negativity_bias
         d_Pcp = sigma_floor / Pcp.sigma
         d_Pca = sigma_floor / Pca.sigma
         d_Tcp = sigma_floor / Tcp.sigma
@@ -289,10 +290,15 @@ function build_response_to_citizen_collective(citizen):
 
 The enacted policy (Pge) drives engagement through the
 citizen's CONSCIOUS (stated) policy positions, every step
-in BOTH phases (DESIGN §8.6.2). A realized aversion stirs
-anger (engagement up); a persistently unmet preference
-breeds resignation (engagement down). It runs against the
-current Pge with no stored state, so a change of
+in BOTH phases (DESIGN §8.6.2), via two logistic-sigmoid
+channels. A realized aversion drives the aversion-match
+channel (engagement up); a persistently unmet preference
+drives the preference-gap channel (engagement down). Each
+channel's midpoint is a per-citizen fraction of A_max — the
+matched-policy self-overlap ceiling of its signal band,
+recomputed each step from the current spreads — so the
+half-response point stays inside the band. It runs against
+the current Pge with no stored state, so a change of
 government simply washes the old response out. The ideal
 overlap I(Pci, Pge) remains the well-being OUTCOME measure
 only and no longer feeds engagement (a citizen cannot
@@ -301,28 +307,41 @@ so traits (Tcp/Tca) are untouched here.
 
 ```
 function build_response_to_government(citizen):
-    w     = threat_weight
-    ger   = govt_engagement_rate
+    w     = negativity_bias        # per-citizen draw, ~2
+    ges   = govt_engagement_scale  # per-citizen draw
     d_Pcp = sigma_floor / Pcp.sigma
     d_Pca = sigma_floor / Pca.sigma
+    S(z)  = 1 / (1 + exp(-z))      # logistic sigmoid
 
     # Record the outcome measure (not an engagement input).
     citizen.well_being = sum_n(I(Pci, Pge))
 
-    # Aversion enacted -> anger -> toward engaged (up).
-    #   I(Pca,Pge) is most negative when the hated thing
-    #   is done, so -I is the positive anger signal. It
-    #   touches an aversion, so it carries threat weight.
-    anger = max(0, -I(Pca, Pge))            # per dim n
-    Pca.theta_shift += ger * w * d_Pca * anger
+    # Band ceilings: matched-policy self-overlap, depends
+    #   only on the two spreads (§8.6.2, §9). Per dim n.
+    A_max_av = matched_self_overlap(Pca.sigma, Pge.sigma)
+    A_max_pg = matched_self_overlap(Pcp.sigma, Pge.sigma)
 
-    # Preference unmet -> resignation -> toward apathy.
-    #   Grows as satisfaction I(Pcp,Pge) falls below the
-    #   reference sat_ref. Subtracted from theta_shift, so
-    #   it drives theta toward apathy; scaled by
-    #   definedness so it bites hardest on SHARP citizens.
-    resignation = max(0, sat_ref - I(Pcp, Pge))  # per n
-    Pcp.theta_shift -= ger * d_Pcp * resignation
+    # Midpoints = per-citizen fraction of each ceiling, so
+    #   the half-response point stays inside (0, A_max].
+    m_av = aversion_match_midpoint_frac * A_max_av
+    m_pg = preference_gap_midpoint_frac * A_max_pg
+
+    # Aversion-match channel -> toward engaged (up).
+    #   I(Pca,Pge) is most negative when the opposed thing
+    #   is done, so -I is the positive driver. It touches
+    #   an aversion, so it carries the negativity bias w.
+    drive_av = S(aversion_match_steepness
+                 * (-I(Pca, Pge) - m_av))     # per dim n
+    Pca.theta_shift += ges * w * d_Pca * drive_av
+
+    # Preference-gap channel -> toward apathy (down).
+    #   Driver is the shortfall of preference_alignment
+    #   = I(Pcp,Pge) below the midpoint. Subtracted from
+    #   theta_shift; scaled by definedness so it bites
+    #   hardest on SHARP citizens.
+    drive_pg = S(preference_gap_steepness
+                 * (m_pg - I(Pcp, Pge)))      # per dim n
+    Pcp.theta_shift -= ges * d_Pcp * drive_pg
 ```
 
 ### 3.5 Apply Influence Shifts (per citizen)
@@ -366,8 +385,8 @@ and govern phases (DESIGN §8.6, §8.6.5–§8.6.6). It applies
 the NET accumulated theta_shift, then the spread-
 proportional fade toward apathy, then refreshes the cached
 integration variables. theta_shift is the net drive: most
-sources add (toward the engaged pole), resignation
-subtracts. The fade = engagement_decay_rate * sigma is
+sources add (toward the engaged pole), the preference-gap
+drive subtracts. The fade = engagement_decay_rate * sigma is
 applied to every stated Gaussian, so even a fully engaged
 citizen fades (no freeze trap), while sharp (small-sigma)
 views fade slowly and broad ones fade fast.
@@ -521,8 +540,9 @@ function govern(sim, world, hdf5, glyph, cycle):
         #   (1) recompute the citizen-vs-government overlaps
         #   (all three — Pci, Pcp, Pca vs Pge — refreshed);
         #   (2) reset the theta accumulators; (3) accumulate
-        #   the government anger/resignation response (which
-        #   also sets the well-being outcome measure); and
+        #   the government aversion-match/preference-gap
+        #   response (which also sets the well-being outcome
+        #   measure); and
         #   (4) apply the engagement update + spread fade. No
         #   politician/community sources act during governing
         #   — only the government push and the fade.

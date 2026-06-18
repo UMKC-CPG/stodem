@@ -278,7 +278,7 @@ each zone type (determined by that patch's location).
   ideal policy preference and enacted government policy:
   `sum(overlap(Pci, Pge))`. This simple implementation is
   a placeholder. A richer model incorporating resource
-  accumulation, perceived satisfaction, community fit,
+  accumulation, preference alignment, community fit,
   and other factors is under design (§8.5). An earlier
   idea suggested a sensitivity function (e.g., A e^(-a x))
   where low well-being makes citizens more susceptible to
@@ -785,10 +785,11 @@ feedback:
 1. `overlap(Pci, Pge)` changes — citizen well-being
    (the objective outcome measure) changes.
 2. `overlap(Pcp, Pge)` and `overlap(Pca, Pge)` change —
-   perceived satisfaction and felt threat change.
-3. Those conscious overlaps feed engagement as
-   resignation (unmet preference, down) and anger
-   (enacted aversion, up); see §8.6.2. Well-being itself
+   preference alignment and aversion alignment change.
+3. Those conscious overlaps feed engagement as the
+   preference-gap drive (unmet preference, down) and
+   the aversion-match drive (enacted aversion, up); see
+   §8.6.2. Well-being itself
    (the ideal overlap) no longer feeds engagement.
 4. Engagement affects vote probability.
 5. Vote probability affects who wins next cycle.
@@ -843,9 +844,10 @@ model.** The engagement-related entries below (rows 1 and
 under "structural properties") describe the old engagement
 model: a one-way upward ratchet plus a proportional decay
 that froze at full engagement. The engagement redesign —
-a threat-weighted, definedness-gated push, government-
-driven anger and resignation, and a spread-proportional
-fade, all running every step in both phases — is now
+a negativity-weighted, definedness-gated push,
+government aversion-match and preference-gap channels,
+and a spread-proportional fade, all running every step
+in both phases — is now
 implemented in the code and specified in §8.2, §8.6.2,
 §8.6.5, and §8.6.6, which are authoritative. These matrix
 rows are retained only until the master matrix is
@@ -1052,12 +1054,12 @@ policy you are strongly averse to mobilizes you to fight,
 exactly as one who matches your preference mobilizes you to
 support. Two refinements shape this push:
 
-- *Threat counts double.* Any engagement term that
+- *Negativity counts double.* Any engagement term that
   involves an aversion — the citizen's or the other
-  side's — is multiplied by `threat_weight` (about 2).
-  Plain preference-meets-preference agreement counts at
-  ordinary strength. A shared enemy, or a direct threat,
-  mobilizes harder than shared enthusiasm. See §8.6.2.
+  side's — is multiplied by `negativity_bias` (centered
+  near 2). Plain preference-meets-preference agreement
+  counts at ordinary strength. Opposition mobilizes more
+  than agreement. See §8.6.2.
 - *Definedness gates the push.* The push is scaled by how
   sharply the citizen holds the view, measured as
   `sigma_floor / sigma` (near 1 for a sharp view, near 0
@@ -1065,13 +1067,14 @@ support. Two refinements shape this push:
   hard to rouse; a citizen with a sharp one is easily
   roused. See §8.6.2.
 
-**Engagement responds to the government (anger and
-resignation)**. The enacted policy drives engagement
-through the citizen's *conscious* (stated) positions,
-every step in both phases. Having the thing you
-consciously oppose enacted raises engagement (anger, a
-mobilizing response); having what you consciously want go
-unmet lowers it (resignation, a withdrawing response).
+**Engagement responds to the government (aversion-match
+and preference-gap)**. The enacted policy drives
+engagement through the citizen's *conscious* (stated)
+positions, every step in both phases. Having the thing
+you consciously oppose enacted raises engagement (the
+aversion-match drive, mobilizing); having what you
+consciously want go unmet lowers it (the preference-gap
+drive, withdrawing).
 This replaces the older "absolute well-being raises
 engagement" rule, which could only ever mobilize and never
 let anyone give up. The objective well-being measure
@@ -1162,14 +1165,17 @@ For detailed trait acclimatization formulas, see
 These concepts are under active design discussion. Current
 thinking:
 
-**Perceived satisfaction** (relatively settled): Direct overlap
+**Preference alignment** (relatively settled): Direct overlap
 between stated policy preferences and enacted policy:
-overlap(Pcp, Pge). Represents how satisfied the citizen *feels*,
-regardless of whether the policy actually benefits them. This
+overlap(Pcp, Pge) = preference_alignment. Measures the
+citizen's CONSCIOUS alignment with enacted policy, regardless
+of whether the policy actually benefits them (that hidden
+benefit is the well-being measure, overlap(Pci, Pge)). This
 conscious overlap, together with its aversion counterpart
 overlap(Pca, Pge), is now the channel by which the government
-drives engagement — resignation when a stated preference goes
-unmet, anger when a stated aversion is enacted (§8.6.2). The
+drives engagement — the preference-gap drive when a stated
+preference goes unmet, the aversion-match drive when a
+stated aversion is enacted (§8.6.2). The
 older path, in which the objective ideal-vs-enacted overlap
 overlap(Pci, Pge) drove engagement through its absolute value,
 is retired: the ideal overlap remains the simulation's
@@ -1192,7 +1198,7 @@ than accumulation), diminishing returns (concave mapping to
 well-being).
 
 **Well-being** (candidate model): Composite scalar with
-candidate inputs: resource, perceived satisfaction, community
+candidate inputs: resource, preference alignment, community
 fit (trait overlap with zone averages), policy consistency
 (stated vs. ideal preference alignment), and policy stability
 (variance of Pge over a rolling window). Exact functional form
@@ -1222,7 +1228,7 @@ implementation, the following decisions are needed:
    resource be per-citizen or per-patch?
 
 2. **Well-being composite**: What is the functional form
-   of `f(resource, perceived_satisfaction,
+   of `f(resource, preference_alignment,
    community_fit, policy_consistency,
    policy_stability)`? How should the inputs be
    weighted?
@@ -1237,8 +1243,9 @@ implementation, the following decisions are needed:
    objective outcome measure. **Updated**: the
    government→engagement coupling no longer runs through
    that ideal overlap; it runs through the conscious
-   `overlap(Pcp, Pge)` and `overlap(Pca, Pge)` as anger
-   and resignation (§8.6.2). The richer well-being model
+   `overlap(Pcp, Pge)` and `overlap(Pca, Pge)` as the
+   preference-gap and aversion-match drives (§8.6.2). The
+   richer well-being model
    can still slot in behind the outcome measure without
    restructuring call sites. (See §6.1 and TODO #9.)
 
@@ -1253,7 +1260,8 @@ prevents order-of-evaluation artifacts: the sequence in which
 influence sources are processed does not affect the outcome.
 
 **Engagement evolves every step, in both phases.** The
-government anger/resignation push (§8.6.2) and the spread-
+government aversion-match/preference-gap push (§8.6.2)
+and the spread-
 proportional fade (§8.6.6) run on every step of BOTH the
 campaign and the governing phase, so a citizen's engagement
 is a single continuous process with a consistent per-step
@@ -1315,12 +1323,14 @@ the citizen Gaussian it involves, driving that Gaussian
 toward its engaged pole. Two weights modulate every
 contribution:
 
-- **Threat weight w.** Any term that involves an aversion
-  Gaussian — the citizen's or the other side's — is
-  multiplied by `threat_weight` (w, about 2). Only a
-  preference-meets-preference term counts at weight 1.
-  (See §8.2: shared opposition and direct threat mobilize
-  harder than shared enthusiasm.)
+- **Negativity bias w.** Any term that involves an
+  aversion Gaussian — the citizen's or the other side's —
+  is multiplied by `negativity_bias` (w, centered near 2).
+  Only a preference-meets-preference term counts at
+  weight 1. (See §8.2: opposition mobilizes more than
+  agreement.) w is drawn per
+  citizen (§8.6.8), so the strength of the bias varies
+  across the population.
 - **Definedness d.** Every contribution is scaled by the
   definedness of the citizen Gaussian being shifted,
   d = min(1, sigma_floor / sigma) (near 1 for a sharp view,
@@ -1329,8 +1339,8 @@ contribution:
   initial sigma drawn below the floor.
 
 theta_shift is the NET drive toward the engaged pole: most
-sources add to it (more engaged); resignation (below)
-subtracts from it (less engaged).
+sources add to it (more engaged); the preference-gap drive
+(below) subtracts from it (less engaged).
 
 **From each politician p** (f_pol = policy_persuasion,
 f_trait = trait_persuasion; d_X = min(1, sigma_floor/X.sigma)):
@@ -1345,7 +1355,7 @@ Tca.theta_shift[m] += f_trait * d_Tca * w*|I(Tca,Tpx)[m]|
 ```
 
 Only the pure preference-preference terms (Pcp-Ppp,
-Tcp-Tpx) escape the threat weight; every aversion-touching
+Tcp-Tpx) escape the negativity bias; every aversion-touching
 term carries w.
 
 **From zone averages (citizen collective)** (scaled by
@@ -1362,47 +1372,108 @@ Tca.theta_shift[m] += d_Tca * w
         * ( |I(Tca,avg_Tca)[m]| +   |I(Tca,avg_Tcp)[m]| )
 ```
 
-**From the government (anger and resignation)**. The
+**From the government (two sigmoidal channels)**. The
 enacted policy Pge drives engagement through the citizen's
-conscious (stated) policy positions. These contributions
-are applied every step in BOTH the campaign and the
-governing phase (§8.6, §8.6.5), against the current Pge,
-with no stored state — a change of government simply
+conscious (stated) policy positions in two opposing
+channels. Both are applied every step in BOTH the campaign
+and the governing phase (§8.6, §8.6.5), against the current
+Pge, with no stored state — a change of government simply
 washes the old response out.
 
-```
-# Aversion realized -> anger -> more engaged (up).
-anger[n]       = max(0, -I(Pca,Pge)[n])
-Pca.theta_shift[n] += govt_engagement_rate * w * d_Pca
-                          * anger[n]
+Each channel is a logistic sigmoid S(z) = 1/(1+exp(-z)),
+bounded in (0, 1), of a signed driver. The midpoint sets
+where the response reaches half strength; the steepness k
+sets how sharply it switches. As k → ∞ the sigmoid
+recovers the hard hinge it replaces, so this form strictly
+generalizes the earlier max(0, ·) thresholds while
+removing their kink. Both drivers share one band: 0 at the
+inactive end, rising to a positive ceiling A_max — the
+matched-policy self-overlap, the largest overlap a
+perfectly-positioned enacted policy can reach. Each midpoint
+must therefore sit INSIDE (0, A_max), never at an edge: an
+edge would put the half-response point exactly where the
+channel should read ~0. So the aversion-match midpoint sits
+near the middle of the band (NOT at 0 — otherwise the
+channel is already half-on when nothing opposed is enacted),
+and the preference-gap midpoint sits BELOW A_max (NOT at it
+— otherwise a perfectly-served citizen is half-resigned). To
+keep each midpoint inside its band even as A_max drifts
+(A_max depends on the spreads, which change during the run),
+each is set as a per-citizen FRACTION of its own A_max —
+`aversion_match_midpoint_frac` and
+`preference_gap_midpoint_frac`, drawn at init and centered
+at 0.5 (mid-band). Because the band is narrow (A_max ≤ 1),
+the steepness must be sizeable — order 10, not order 1 — to
+swing the response from near 0 to near 1 across it.
 
-# Preference unmet -> resignation -> less engaged (down).
-resignation[n] = max(0, sat_ref - I(Pcp,Pge)[n])
-Pcp.theta_shift[n] -= govt_engagement_rate * d_Pcp
-                          * resignation[n]
+```
+# A_max: the matched-policy self-overlap, the ceiling of
+#   each channel's signal band. It depends only on the two
+#   spreads (engagement factors cancel; see §9), so it is
+#   recomputed each step from the current sigmas. Per dim.
+A_max_av[n] = matched_self_overlap(Pca.sigma[n], Pge.sigma[n])
+A_max_pg[n] = matched_self_overlap(Pcp.sigma[n], Pge.sigma[n])
+
+# Each midpoint is a per-citizen FRACTION of its band's
+#   ceiling, so it stays inside (0, A_max] as the band
+#   drifts. The fractions are drawn at init, centered 0.5.
+m_av[n] = aversion_match_midpoint_frac * A_max_av[n]
+m_pg[n] = preference_gap_midpoint_frac * A_max_pg[n]
+
+# Aversion-match drive: enacted policy realizes a stated
+#   aversion -> engagement UP. Driver -I(Pca,Pge) is
+#   positive when the opposed thing is being done.
+drive_av[n] = S( aversion_match_steepness
+                 * ( -I(Pca,Pge)[n] - m_av[n] ) )
+Pca.theta_shift[n] += govt_engagement_scale * w * d_Pca
+                          * drive_av[n]
+
+# Preference-gap drive: enacted policy falls short of a
+#   stated preference -> engagement DOWN. Driver is the
+#   shortfall of preference_alignment below its midpoint.
+drive_pg[n] = S( preference_gap_steepness
+                 * ( m_pg[n] - I(Pcp,Pge)[n] ) )
+Pcp.theta_shift[n] -= govt_engagement_scale * d_Pcp
+                          * drive_pg[n]
 ```
 
-Anger is aversion-touching, so it carries the threat
-weight w; resignation is preference-side and does not.
-Because of that single factor, the mobilizing channel is
-about twice the withdrawing channel by construction.
-Anger lifts engagement on the aversion the government
-realizes; resignation lowers it on the preference the
-government neglects. Resignation is scaled by definedness
-too, so it bites hardest on SHARP citizens — the
-well-informed voter who knows exactly what they want, sees
-it persistently ignored, and stops participating while
-keeping a sharp opinion intact.
+The aversion-match channel is aversion-touching, so it
+carries the negativity bias w; the preference-gap channel is
+preference-side and does not. Because of that single
+factor the mobilizing channel is about twice the
+withdrawing channel by construction. Aversion-match lifts
+engagement on the aversion the government realizes;
+preference-gap lowers it on the preference the government
+neglects. The preference-gap drive is scaled by
+definedness too, so it bites hardest on SHARP citizens —
+the well-informed voter who knows exactly what they want,
+sees it persistently ignored, and stops participating
+while keeping a sharp opinion intact.
 
 Sign and normalization follow the §9 integral catalog:
 I(Pca,Pge) is most negative when the citizen's aversion
-coincides with the enacted policy (the hated thing is
-done), so -I gives a positive anger signal; sat_ref is a
-reference "fully satisfied" overlap level (a single
-constant near the matched-policy self-overlap; its exact
-value is a code detail). Government engagement acts on
-policy Gaussians only — the government enacts policy, not
-traits — so Tcp/Tca are untouched here.
+coincides with the enacted policy (the opposed thing is
+done), so -I gives a positive aversion-match signal;
+preference_alignment = I(Pcp,Pge) is the overlap of the
+stated preference with the enacted policy. The band ceiling
+matched_self_overlap(σ1, σ2) is the normalized overlap of
+two Gaussians at the same position (d = 0): with ζ =
+1/(2σ1²) + 1/(2σ2²) it is (π/ζ)^0.5 / [(πσ1²)^0.25
+(πσ2²)^0.25], so the cos θ factors cancel and A_max depends
+only on the spreads. The effective midpoint m_pg =
+preference_gap_midpoint_frac · A_max_pg (and likewise m_av)
+is thus held inside (0, A_max] at the half-response level by
+construction.
+Government engagement acts on policy Gaussians only — the
+government enacts policy, not traits — so Tcp/Tca are
+untouched here.
+
+The five constants of these two channels —
+govt_engagement_scale, the two midpoint fractions, and the two
+steepnesses — are not shared global values. Each citizen
+draws its own at initialization from centered,
+domain-appropriate distributions (§8.6.8), giving a
+heterogeneous population rather than one magic number.
 
 #### 8.6.3 Policy Position and Spread Accumulation
 
@@ -1453,9 +1524,10 @@ citizens still resist having their positions moved. The
 former concern — that the engagement *process* feeding
 theta was too simplistic for this factor to behave well —
 is addressed by the redesign in §8.6.2 and §8.6.6.
-Engagement now both rises (a stake-driven push, threat-
-weighted and definedness-gated, plus government-driven
-anger) and falls (government-driven resignation, and a
+Engagement now both rises (a stake-driven push,
+negativity-weighted and definedness-gated, plus the
+government aversion-match drive) and falls (the
+government preference-gap drive, and a
 spread-proportional fade that bites even at full
 engagement). Citizens no longer march monotonically to
 full engagement and freeze; a stable fraction of vague,
@@ -1719,14 +1791,15 @@ theta_new = clamp(theta_new, 0, pi/2)
 ```
 
 theta_shift is the NET drive from §8.6.2: positive values
-(politician, community, and anger pushes) drive theta toward
-the engaged pole, while resignation makes it smaller or
-negative, driving theta toward apathy. fade is the spread-
-proportional pull of §8.6.6. Aversion Gaussians use the
-mirrored update (theta toward pi = engaged; see §8.6.6).
-This engagement update runs every step in BOTH the campaign
-and governing phases (§8.6); during governing only the
-government anger/resignation push and the fade are present,
+(politician, community, and aversion-match pushes) drive
+theta toward the engaged pole, while the preference-gap
+drive makes it smaller or negative, driving theta toward
+apathy. fade is the spread-proportional pull of §8.6.6.
+Aversion Gaussians use the mirrored update (theta toward
+pi = engaged; see §8.6.6). This engagement update runs
+every step in BOTH the campaign and governing phases
+(§8.6); during governing only the government
+aversion-match/preference-gap push and the fade are present,
 since no politicians or community averages act then.
 
 #### 8.6.6 Engagement Fade
@@ -1770,7 +1843,8 @@ Key properties:
 
 This fade runs every step in BOTH the campaign and
 governing phases (§8.6), alongside the government
-anger/resignation push, so engagement evolves continuously;
+aversion-match/preference-gap push, so engagement evolves
+continuously;
 the phases differ only in which other pushes are present.
 
 *Design-record — rejected alternatives.* Two earlier forms
@@ -1811,12 +1885,26 @@ TOML configuration:
 | Parameter | Purpose | Initial |
 |---|---|---|
 | `engagement_decay_rate` | Spread-proportional fade toward apathy per step: fade = rate * sigma (radians of fade per unit of spread per step; replaces the old proportional theta *= (1+rate)) | TBD |
-| `threat_weight` | Multiplier (w) on every engagement term that involves an aversion Gaussian — direct threat or shared opposition; pure preference-preference agreement stays at 1 (§8.6.2) | 2.0 |
-| `govt_engagement_rate` | Scale of the government-driven anger (up) and resignation (down) engagement pushes (§8.6.2) | TBD |
-| `sat_ref` | Reference "fully satisfied" overlap level; resignation grows as overlap(Pcp, Pge) falls below it (§8.6.2). Set near the matched-policy self-overlap | TBD |
+| `negativity_bias` | Multiplier (w) on every engagement term that involves an aversion Gaussian — shared or direct opposition; pure preference-preference agreement stays at 1 (§8.6.2). Per-citizen Gaussian draw, floored at 1.0 so it never inverts the bias | center 2.0, spread ~0.3 |
+| `govt_engagement_scale` | Overall magnitude of the two government engagement channels (§8.6.2). Per-citizen half-normal draw (≥0) | center TBD |
+| `aversion_match_midpoint_frac` | Per-citizen FRACTION of A_max_av setting the aversion-match (engagement-up) midpoint m_av = frac · A_max_av — the aversion-realization level (−I(Pca,Pge)) at which the channel is half-on. In (0,1), centered 0.5 (mid-band), so the midpoint stays inside (0, A_max] as A_max drifts; NOT 0, else the channel is half-on when nothing opposed is enacted (§8.6.2). Per-citizen truncated-normal draw | center 0.5 |
+| `aversion_match_steepness` | Sigmoid steepness k of the aversion-match channel; larger = sharper switch, k→∞ recovers the old hinge. Must be sizeable (order 10) since the (0, A_max] signal band is narrow (§8.6.2). Per-citizen truncated-normal draw (≥0) | center ~10 |
+| `preference_gap_midpoint_frac` | Per-citizen FRACTION of A_max_pg setting the preference-gap (engagement-down) midpoint m_pg = frac · A_max_pg — the preference_alignment level at which withdrawal is half-on. In (0,1), centered 0.5 (mid-band), so it stays BELOW A_max as the band drifts (NOT at it, else a perfectly-served citizen is half-resigned; §8.6.2). Per-citizen truncated-normal draw | center 0.5 |
+| `preference_gap_steepness` | Sigmoid steepness k of the preference-gap channel; sizeable (order 10) for the same narrow-band reason as the aversion-match steepness (§8.6.2). Per-citizen truncated-normal draw (≥0) | center ~10 |
 | `defensive_ratio` | Scales targeted backlash mu shift | 1.0 |
 | `sigma_floor` | Minimum sigma for all Gaussians; the target of defensive narrowing; also the floor that keeps the spread-proportional fade nonzero and sets the maximum definedness (sigma_floor/sigma → 1) | 0.05 (~20× narrower than a typical initial sigma of O(1)) |
 | `engagement_protection` | c in S() = sigma*(1 - c*|cos(theta)|); c=1 makes fully engaged citizens completely immovable | 1.0 |
+
+The per-citizen randomized parameters above —
+`negativity_bias`, `govt_engagement_scale`, and the two
+channel midpoint fractions and steepnesses — are each configured in
+the TOML as a `(center, spread)` pair. The spread sets how
+much the population varies; the draw uses the shared `rng`
+(seed 8675309) so runs stay reproducible, and a spread of 0
+recovers a single shared constant. Distributions respect
+each parameter's domain (half-normal for the nonnegative
+scale, a floored normal for the bias, truncated normals for
+the midpoint fractions and steepnesses).
 
 *Back-burnered — force/momentum parameters*: If the
 dynamics model is ever revisited, additional parameters
@@ -1841,9 +1929,10 @@ retained, and the engagement factor is KEPT by design.
 The earlier concern — that the immovability of fully
 engaged citizens only behaves well once the engagement
 *process* feeding theta is fixed — is now resolved by the
-§8.6.2/§8.6.6 redesign: engagement both rises (threat-
-weighted, definedness-gated push plus government anger) and
-falls (government resignation plus a spread-proportional
+§8.6.2/§8.6.6 redesign: engagement both rises
+(negativity-weighted, definedness-gated push plus the
+government aversion-match drive) and falls (the government
+preference-gap drive plus a spread-proportional
 fade that bites even at full engagement), so citizens no
 longer saturate and freeze. With that process in place the
 engagement factor in S is a settled choice. See §8.6.3 and
@@ -1930,8 +2019,8 @@ Computed once per citizen (single government):
 
 | Integral | Components | Purpose |
 |---|---|---|
-| `Pcp_Pge_ol` | Stated pref vs. enacted | Perceived satisfaction |
-| `Pca_Pge_ol` | Stated aver vs. enacted | Policy frustration |
+| `Pcp_Pge_ol` | Stated pref vs. enacted | Preference alignment |
+| `Pca_Pge_ol` | Stated aver vs. enacted | Aversion alignment |
 | `Pci_Pge_ol` | Ideal pref vs. enacted | True well-being |
 
 ---

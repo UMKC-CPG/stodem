@@ -402,7 +402,7 @@
 #   The politician's policy_persuasion and trait_persuasion parameters
 #   scale the magnitude of these engagement shifts. Two further factors
 #   apply (DESIGN §8.6.2): every aversion-touching term is multiplied by
-#   the threat_weight (only pure pref-pref agreement, Pcp-Ppp and
+#   the negativity_bias (only pure pref-pref agreement, Pcp-Ppp and
 #   Tcp-Tpx, stays at weight 1), and each contribution is scaled by the
 #   definedness sigma_floor/sigma of the citizen Gaussian being shifted,
 #   so sharply held views are roused far more readily than vague ones.
@@ -485,16 +485,18 @@
 #   surrounded by others with strong (agreeing or disagreeing) positions
 #   on an issue will become more engaged with that issue.
 #
-# --- Government-driven citizen engagement (anger / resignation) ---
+# --- Government-driven citizen engagement (aversion-match / pref-gap) ---
 #
 # The enacted policy drives engagement through the citizen's conscious
-#   (stated) policy positions, applied every step in BOTH phases. The
-#   overlap I(Pca, Pge) is most negative when a stated aversion is being
-#   enacted, so -I(Pca, Pge) is a positive ANGER signal that raises
-#   engagement (and carries the threat weight). The satisfaction overlap
-#   I(Pcp, Pge) falling below a reference level sat_ref is RESIGNATION,
-#   which lowers engagement and, being definedness-scaled, bites hardest
-#   on sharp citizens. Both are scaled by govt_engagement_rate. The
+#   (stated) policy positions, applied every step in BOTH phases, via two
+#   logistic-sigmoid channels. The overlap I(Pca, Pge) is most negative
+#   when a stated aversion is being enacted, so -I(Pca, Pge) drives the
+#   AVERSION-MATCH channel that raises engagement (and carries the
+#   negativity bias). The shortfall of preference_alignment = I(Pcp, Pge)
+#   below its midpoint drives the PREFERENCE-GAP channel, which lowers
+#   engagement and, being definedness-scaled, bites hardest on sharp
+#   citizens. Each channel's midpoint is a per-citizen fraction of the
+#   band ceiling A_max. Both are scaled by govt_engagement_scale. The
 #   objective well-being measure (ideal Pci vs Pge) is recorded for
 #   output but no longer feeds engagement (citizens cannot perceive
 #   their hidden ideal).
